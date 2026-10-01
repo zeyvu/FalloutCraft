@@ -19,5 +19,4 @@ fabric/run-guest*/
 __pycache__/
 *.pyc
 
-thingstodo.md
 commonlibf4-template/

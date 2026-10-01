@@ -1,17 +1,29 @@
 # FalloutCraft
 
+**Play Fallout 4 as a Minecraft player.** A Fallout 4 + Minecraft crossover mod: Minecraft's
+movement, inventory, building, hearts and combat inside the Commonwealth.
+
+![Fallout 4](https://img.shields.io/badge/Fallout%204-1.11.240-2a5f8f)
+![F4SE](https://img.shields.io/badge/F4SE-0.7.9-555)
+![Minecraft](https://img.shields.io/badge/Minecraft-26.3-62b47a)
+![Fabric](https://img.shields.io/badge/Fabric-0.19.5-dbd0b4)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
 ![FalloutCraft: a Minecraft player on Red Rocket's gas station](docs/screenshot.jpg)
 
-Play Fallout 4 as a Minecraft player. You move with Minecraft's physics, carry Minecraft's
-inventory and HUD, and place and break blocks in the Commonwealth. You fight Fallout's raiders,
-mole rats and bloodbugs with Minecraft weapons, and they fight back.
+<!-- Demo video: replace with a link to the YouTube video (or a GIF in docs/) when it's ready. -->
+
+Walk, sprint and jump through Sanctuary with Minecraft's physics. Build a base out of Minecraft
+blocks on top of Red Rocket. Fight raiders, mole rats and bloodbugs with a diamond sword, a bow
+and a shield, while your Fallout S.P.E.C.I.A.L. makes Steve faster, stronger or tougher. Open the
+Pip-Boy and listen to Diamond City Radio while you do it.
 
 Neither game is rewritten. Minecraft runs its own game logic, and Fallout 4 runs its world, NPCs,
 quests, Pip-Boy and saves. A Fallout 4 F4SE plugin and a Minecraft Fabric mod talk to each other
 through shared memory. Minecraft runs hidden in the background, and Fallout draws everything.
 
-FalloutCraft is a fork of [SkyCraft](https://github.com/chasmlol/SkyCraft), which does the same
-for Skyrim. It keeps SkyCraft's Minecraft mod and replaces the Skyrim plugin with a Fallout 4 one.
+FalloutCraft is built on [SkyCraft](https://github.com/chasmlol/SkyCraft) by chasmlol, the
+Skyrim + Minecraft mod (see [Credits](#credits)).
 
 > **Status: early and experimental.** Expect rough edges, and back up your saves.
 > This is a fan project. It isn't affiliated with Mojang, Microsoft, Bethesda or ZeniMax, and you
@@ -87,10 +99,26 @@ repo as a ZIP from GitHub).
 
 ## Installing
 
+### Quick install (from Releases)
+
+No Git or build tools needed. Grab the files from the
+[latest release](https://github.com/zeyvu/FalloutCraft/releases/latest):
+
+1. Install **F4SE** and the **Address Library** (see [Fallout 4 mods](#1-fallout-4-mods) below).
+2. Install **`FalloutCraft-<version>-FO4.zip`** with Mod Organizer 2 / Vortex (*Install mod from
+   archive*), or copy **`commonlibf4-template.dll`** into `Fallout 4\Data\F4SE\Plugins\`.
+3. In your Minecraft launcher (Prism Launcher, MultiMC, official) make a **Minecraft 26.3 + Fabric
+   Loader 0.19.5** instance running **Java 25**, and put **Fabric API 0.161.0+26.3** and
+   **`falloutcraft-<version>.jar`** in its `mods` folder.
+4. Start that Minecraft instance first (its window hides and it waits for Fallout), then start
+   Fallout 4 through F4SE and load a save.
+
+### Full install (from the repo)
+
 The repo comes with the plugin already compiled, so you don't need to build anything to play.
 (If you'd rather build it yourself, see [Building from source](#building-from-source).)
 
-### 1. Fallout 4 mods
+#### 1. Fallout 4 mods
 
 Install these first, with your mod manager (Mod Organizer 2, Vortex) or by hand:
 
@@ -100,7 +128,7 @@ Install these first, with your mod manager (Mod Organizer 2, Vortex) or by hand:
 2. **Address Library for F4SE Plugins:** its `.bin` file goes into
    `Fallout 4\Data\F4SE\Plugins\`.
 
-### 2. Get FalloutCraft
+#### 2. Get FalloutCraft
 
 ```bat
 git clone https://github.com/zeyvu/FalloutCraft
@@ -108,7 +136,7 @@ git clone https://github.com/zeyvu/FalloutCraft
 
 (or **Code > Download ZIP** on GitHub and unzip it).
 
-### 3. Install the plugin
+#### 3. Install the plugin
 
 Copy **`FO4_Release\Data\F4SE\Plugins\commonlibf4-template.dll`** into
 **`Fallout 4\Data\F4SE\Plugins\`** (next to the Address Library's `.bin`). That's the FalloutCraft
@@ -117,7 +145,7 @@ plugin; F4SE loads it when the game starts.
 > With Mod Organizer 2 or Vortex: zip the `FO4_Release\Data` folder (so the zip has `Data` at its
 > top) and install the zip as a mod.
 
-### 4. Start Minecraft
+#### 4. Start Minecraft
 
 ```bat
 cd FalloutCraft\fabric
@@ -128,7 +156,7 @@ That builds the FalloutCraft Minecraft mod and starts Minecraft with it. The fir
 Minecraft 26.3, Fabric and the Fabric API (a few minutes). Minecraft hides its window and waits
 for Fallout. Leave it running.
 
-### 5. Play
+#### 5. Play
 
 1. With Minecraft running, start **Fallout 4 through F4SE** (`f4se_loader.exe` or your mod
    manager) and load a save.
@@ -218,7 +246,7 @@ copy /Y FO4_ModFiles\*.h commonlibf4-template\src\
 copy /Y FO4_ModFiles\xmake.lua commonlibf4-template\xmake.lua
 
 :: your Fallout 4 folder (the one with Fallout4.exe), so the build installs into it
-setx XSE_FO4_GAME_PATH "C:\Program Files (x86)\Steam\steamapps\common\Fallout 4"
+setx XSE_FO4_GAME_PATH "C:\Games\Fallout 4"
 ```
 
 `FO4_ModFiles\xmake.lua` is the template's build file plus the Direct3D and DbgHelp libraries the
@@ -234,7 +262,7 @@ xmake build -r
 The first build downloads CommonLibF4's dependencies and takes a few minutes. It ends with:
 
 ```
-installing commonlibf4-template to "C:\Program Files (x86)\Steam\steamapps\common\Fallout 4\Data .."
+installing commonlibf4-template to C:\Games\Fallout 4\Data ..
 install ok!
 [100%]: build ok
 ```
@@ -265,9 +293,18 @@ For development:
 
 ## Credits
 
-FalloutCraft is based on [SkyCraft](https://github.com/chasmlol/SkyCraft) by
-[chasmlol](https://github.com/chasmlol): its Minecraft mod, its shared-memory design and most of
-its ideas. The original README is kept as [READMEOriginal.md](READMEOriginal.md).
+FalloutCraft stands on [SkyCraft](https://github.com/chasmlol/SkyCraft) by
+[chasmlol](https://github.com/chasmlol), which brought Minecraft into Skyrim. Go and see it.
+
+- **From SkyCraft:** the idea, the two-games-over-shared-memory design, the shared-memory protocol
+  and the Minecraft Fabric mod. SkyCraft's original README is kept as
+  [READMEOriginal.md](READMEOriginal.md).
+- **New in FalloutCraft:** the whole Fallout 4 F4SE plugin (`FO4_ModFiles/`): driving Fallout's
+  player, streaming Fallout 4's Havok collision, drawing Minecraft's blocks, items and HUD in
+  Fallout's renderer, the Pip-Boy hand-over, the F5 cameras, combat with Fallout's actors, separate
+  interiors and worldspaces. In the Minecraft mod: Fallout's ground as a safety net under the
+  player, health shared with Fallout, S.P.E.C.I.A.L. attributes, and armour and shields against
+  Fallout's gunfire.
 
 ## License
 

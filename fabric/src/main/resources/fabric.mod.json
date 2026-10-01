@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "id": "skycraft",
   "version": "${version}",
-  "name": "SkyCraft",
-  "description": "Play Skyrim with Minecraft physics, inventory and viewmodels.",
-  "authors": ["chasmlol"],
+  "name": "FalloutCraft",
+  "description": "Play Fallout 4 as a Minecraft player: Minecraft physics, inventory, HUD, building and combat inside the Commonwealth. Based on SkyCraft by chasmlol.",
+  "authors": ["zeyvu", "chasmlol (SkyCraft)"],
   "contact": {
-    "sources": "https://github.com/chasmlol/SkyCraft"
+    "sources": "https://github.com/zeyvu/FalloutCraft"
   },
   "license": "MIT",
   "environment": "client",
