@@ -1,6 +1,20 @@
-#include "Game.h"
+// FalloutCraft Phase 2a: Minecraft's own client on screen. Minecraft renders its first-person
+// hand, held item, hotbar, hearts, crosshair and every open screen (inventory, chat, crafting)
+// into a shared-memory frame; this draws that frame over Fallout's, in Fallout's Present.
+// Ported from the Skyrim plugin (skse/src/Overlay.cpp).
 
+#include "fo_common.h"
+
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <d3d11.h>
 #include <d3dcompiler.h>
+#undef ERROR  // wingdi.h; clashes with REX::ERROR
+
+#include "fo_blocks.h"
+
+#include <cstring>
 
 namespace skycraft
 {
@@ -89,7 +103,7 @@ float4 PSMain(VSOut i) : SV_Target {
 			ID3DBlob* errors = nullptr;
 			const auto hr = D3DCompile(kShader, sizeof(kShader) - 1, "skycraft_overlay", nullptr, nullptr, a_entry, a_target, D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, a_out, &errors);
 			if (FAILED(hr)) {
-				logger::error("overlay shader {} failed: {}", a_entry, errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
+				REX::ERROR("overlay shader {} failed: {}", a_entry, errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
 				SafeRelease(errors);
 				return false;
 			}
@@ -162,7 +176,7 @@ float4 PSMain(VSOut i) : SV_Target {
 			device->CreateBuffer(&cbd, nullptr, &params);
 
 			const bool ok = vs && ps && psInvert && blend && invertBlend && sampler && raster && depth && params;
-			logger::info("overlay renderer {}", ok ? "ready" : "failed to initialize");
+			REX::INFO("overlay renderer {}", ok ? "ready" : "failed to initialize");
 			initFailed = !ok;
 			return ok;
 		}
@@ -185,22 +199,21 @@ float4 PSMain(VSOut i) : SV_Target {
 			td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 			td.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 			if (FAILED(device->CreateTexture2D(&td, nullptr, &texture)) || FAILED(device->CreateShaderResourceView(texture, nullptr, &srv))) {
-				logger::error("overlay texture {}x{} creation failed", a_w, a_h);
+				REX::ERROR("overlay texture {}x{} creation failed", a_w, a_h);
 				return false;
 			}
 			texW = a_w;
 			texH = a_h;
-			logger::info("overlay texture {}x{}", a_w, a_h);
+			REX::INFO("overlay texture {}x{}", a_w, a_h);
 			return true;
 		}
 
 		void UploadLatestFrame()
 		{
-			auto& link = Link::Get();
-			if (!link.AcquireOverlayFrame()) {
+			if (!link::AcquireOverlayFrame()) {
 				return;
 			}
-			const auto* hdr = link.FrontHeader();
+			const auto* hdr = link::FrontHeader();
 			if (hdr->width == 0 || hdr->height == 0 || hdr->width > proto::kMaxOverlayW || hdr->height > proto::kMaxOverlayH) {
 				return;
 			}
@@ -211,7 +224,7 @@ float4 PSMain(VSOut i) : SV_Target {
 			if (FAILED(context->Map(texture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 				return;
 			}
-			const auto* src = link.FrontPixels();
+			const auto* src = link::FrontPixels();
 			const auto  rowBytes = hdr->width * 4;
 			auto*       dst = static_cast<std::uint8_t*>(mapped.pData);
 			if (mapped.RowPitch == rowBytes) {
@@ -234,11 +247,11 @@ float4 PSMain(VSOut i) : SV_Target {
 				st.viewportW = static_cast<int>(desc.BufferDesc.Width);
 				st.viewportH = static_cast<int>(desc.BufferDesc.Height);
 			}
-			if (!Link::Get().Valid() || !Link::Get().McAlive() || !st.mcInWorld || !InitResources(a_swapChain)) {
+			if (!link::IsOpen() || !link::MinecraftAlive() || !st.mcInWorld || !InitResources(a_swapChain)) {
 				return;
 			}
 			UploadLatestFrame();
-			if (!haveFrame || st.skyrimMenuOpen) {
+			if (!haveFrame || st.falloutMenuOpen || !st.minecraftOwnsPlayer) {  // also while Minecraft settles after a teleport
 				return;
 			}
 
@@ -255,7 +268,7 @@ float4 PSMain(VSOut i) : SV_Target {
 				static bool logged = false;
 				if (!logged) {
 					logged = true;
-					logger::error("overlay: back buffer RTV failed (format {})", static_cast<int>(bbDesc.Format));
+					REX::ERROR("overlay: back buffer RTV failed (format {})", static_cast<int>(bbDesc.Format));
 				}
 				return;
 			}
@@ -369,19 +382,15 @@ float4 PSMain(VSOut i) : SV_Target {
 
 		HRESULT WINAPI PresentHook(IDXGISwapChain* a_swapChain, UINT a_sync, UINT a_flags)
 		{
-			// Present runs even while the game is paused (menus, loading), unlike the player update,
-			// so this is where Skyrim tells Minecraft it is still alive.
-			Link::Get().Heartbeat();
-			Game::CheckRenderedCamera();
+			// Present runs even while the game is paused (menus, loading), unlike the player update.
+			link::Heartbeat();
 			try {
-				// Minecraft's world things (blocks, arrows, items) go under its hand and HUD.
-				if (Link::Get().Valid() && InitResources(a_swapChain)) {
-					WorldRender::Draw(device, context, a_swapChain);
+				Game::KeepFirstPersonHidden();
+				// Minecraft's blocks go under its hand and HUD.
+				if (link::IsOpen() && InitResources(a_swapChain)) {
+					Blocks::Draw(device, context, a_swapChain);
 				}
 				DrawOverlay(a_swapChain);
-				if (device) {
-					WorldRender::CaptureIfRequested(context, a_swapChain);
-				}
 			} catch (...) {
 			}
 			return originalPresent(a_swapChain, a_sync, a_flags);
@@ -392,11 +401,13 @@ float4 PSMain(VSOut i) : SV_Target {
 	{
 		void Install()
 		{
-			auto* window = RE::BSGraphics::Renderer::GetCurrentRenderWindow();
-			auto* swapChain = window ? reinterpret_cast<IDXGISwapChain*>(window->swapChain) : nullptr;
-			if (!swapChain) {
-				logger::error("overlay: no swap chain yet");
+			if (originalPresent) {
 				return;
+			}
+			auto* data = RE::BSGraphics::GetRendererData();
+			auto* swapChain = data ? reinterpret_cast<IDXGISwapChain*>(data->renderWindow[0].swapChain) : nullptr;
+			if (!swapChain) {
+				return;  // the renderer isn't up yet; tried again later
 			}
 			auto** vtable = *reinterpret_cast<void***>(swapChain);
 			DWORD  oldProtect = 0;
@@ -404,7 +415,7 @@ float4 PSMain(VSOut i) : SV_Target {
 			originalPresent = reinterpret_cast<PresentFn>(vtable[8]);
 			vtable[8] = reinterpret_cast<void*>(&PresentHook);
 			::VirtualProtect(&vtable[8], sizeof(void*), oldProtect, &oldProtect);
-			logger::info("overlay: Present hooked");
+			REX::INFO("overlay: Present hooked");
 		}
 	}
 }

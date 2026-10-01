@@ -23,7 +23,7 @@ loom {
 
 	runs {
 		client {
-			programArgs "--username", (System.getenv("SKYCRAFT_USERNAME") ?: "Dovahkiin")
+			programArgs "--username", (System.getenv("SKYCRAFT_USERNAME") ?: "Todd")
 			vmArgs "--enable-native-access=ALL-UNNAMED", "-Dskycraft.quitWithSkyrim=false"
 		}
 	}
