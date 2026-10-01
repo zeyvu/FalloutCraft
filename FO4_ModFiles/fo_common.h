@@ -101,6 +101,15 @@ namespace skycraft
 	// Main thread.
 	bool PickGroundAt(RE::TESObjectCELL* a_cell, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to, RE::NiPoint3& a_hit);
 
+	// Minecraft blocks as Fallout collision, so NPCs (and Fallout's physics) bump into builds.
+	namespace BlockCollision
+	{
+		void OnSolids(const std::uint8_t* a_data, std::uint32_t a_bytes);  // render thread
+		void ClearAll();                                                    // render thread
+		void Update(RE::TESObjectCELL* a_cell, const McVec& a_player);      // main thread
+		bool Owns(const RE::hknpShape* a_shape);
+	}
+
 	namespace Worlds
 	{
 		// Main thread, when the player's world changes: moves g_worldOffset to that world's place.

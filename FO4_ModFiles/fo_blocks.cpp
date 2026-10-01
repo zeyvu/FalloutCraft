@@ -556,6 +556,10 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 				break;
 			case proto::kRenClearAll:
 				ClearSections();
+				BlockCollision::ClearAll();
+				break;
+			case proto::kRenSolids:
+				BlockCollision::OnSolids(a_data, a_bytes);  // FalloutCraft: builds NPCs collide with
 				break;
 			default:
 				break;  // entities, avatar, lights, solids: later phases

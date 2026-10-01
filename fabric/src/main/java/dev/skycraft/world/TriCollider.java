@@ -21,6 +21,9 @@ public final class TriCollider {
 	private static final double SUBSTEP = 0.1;         // horizontal sub-steps so walls can't be tunnelled
 	private static final double AIR_STEP = 0.3;        // walkable surfaces this far above the feet catch you mid-air
 	private static final double EPS = 1e-4;
+	/** What stopped the player last (for the "stuck" diagnostic), or null. */
+	public static volatile SkyTri lastWall;
+	public static volatile double lastWallFeet;
 
 	private static final double[][] FLOOR_SAMPLES = buildSamples();
 
@@ -59,11 +62,15 @@ public final class TriCollider {
 		int steps = Math.max(1, (int) Math.ceil(horizontal / SUBSTEP));
 		double wallFrom = wasOnGround ? step : 0.02;
 		boolean hitWall = false;
+		// FalloutCraft: walls the player is already inside (a door that swung open into him, a
+		// moved object) would push him a little every tick, for as long as he stays: the "controls
+		// drift sideways" bug. Those don't count as walls until he's out of them.
+		java.util.Set<SkyTri> inside = trianglesInside(tris, x, y, z, radius, height, wallFrom, step);
 		for (int i = 0; i < steps; i++) {
 			double px = x, pz = z;
 			x += mx / steps;
 			z += mz / steps;
-			double[] out = pushOutOfWalls(tris, x, y, z, radius, height, wallFrom, step, px, pz);
+			double[] out = pushOutOfWalls(tris, x, y, z, radius, height, wallFrom, step, px, pz, inside);
 			hitWall |= out[0] != x || out[1] != z;
 			x = out[0];
 			z = out[1];
@@ -141,14 +148,46 @@ public final class TriCollider {
 	 * Steep triangles count from {@code wallFrom} above the feet; walkable ones only from the
 	 * step height (below that they are ground, handled by {@link #floor}).
 	 */
+	/** Triangles the player's cylinder already cuts into by more than a hair at (x, y, z). */
+	private static java.util.Set<SkyTri> trianglesInside(
+		List<SkyTri> tris, double x, double y, double z, double radius, double height, double wallFrom, double step
+	) {
+		java.util.Set<SkyTri> out = null;
+		double[] poly = new double[3 * 6];
+		for (SkyTri t : tris) {
+			if (t.stairHelper) {
+				continue;
+			}
+			double lo = y + (t.walkable ? step : wallFrom);
+			double hi = y + height - 0.02;
+			if (t.maxY < lo || t.minY > hi || t.maxX < x - radius || t.minX > x + radius || t.maxZ < z - radius || t.minZ > z + radius) {
+				continue;
+			}
+			int n = clipToSlab(t, lo, hi, poly);
+			if (n == 0) {
+				continue;
+			}
+			double[] c = closestXZ(poly, n, x, z);
+			double d = Math.hypot(x - c[0], z - c[1]);
+			if (radius - d > 0.05) {
+				if (out == null) {
+					out = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+				}
+				out.add(t);
+			}
+		}
+		return out == null ? java.util.Collections.emptySet() : out;
+	}
+
 	private static double[] pushOutOfWalls(
-		List<SkyTri> tris, double x, double y, double z, double radius, double height, double wallFrom, double step, double prevX, double prevZ
+		List<SkyTri> tris, double x, double y, double z, double radius, double height, double wallFrom, double step, double prevX, double prevZ,
+		java.util.Set<SkyTri> inside
 	) {
 		double[] poly = new double[3 * 6];
 		for (int iter = 0; iter < 4; iter++) {
 			double bestPen = 0, bestDx = 0, bestDz = 0;
 			for (SkyTri t : tris) {
-				if (t.stairHelper) {
+				if (t.stairHelper || inside.contains(t)) {
 					continue;
 				}
 				double lo = y + (t.walkable ? step : wallFrom);
@@ -186,6 +225,8 @@ public final class TriCollider {
 				}
 				if (pen > bestPen) {
 					bestPen = pen;
+					lastWall = t;
+					lastWallFeet = y;
 					bestDx = dirX;
 					bestDz = dirZ;
 				}

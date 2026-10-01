@@ -44,6 +44,14 @@ namespace skycraft
 
 		static constexpr int kRegionSize = 8;  // blocks per region edge (must match the Java side)
 
+		// FalloutCraft: the Havok origin reading (see GatherBodies), once settled. Bodies we create
+		// for Minecraft blocks are placed with it.
+		bool HavokOffset(float a_out[3]) const
+		{
+			a_out[0] = offset_[0], a_out[1] = offset_[1], a_out[2] = offset_[2];
+			return offsetChosen_;
+		}
+
 	private:
 		using Clock = std::chrono::steady_clock;
 
@@ -125,6 +133,14 @@ namespace skycraft
 		float offset_[3]{ 0, 0, 0 };
 		float originSeen_[3]{ 1e30f, 1e30f, 1e30f };
 		bool  offsetChosen_{ false };
+		// FalloutCraft: Fallout's own ground (a pick) under the player while the origin reading is
+		// being chosen: the reading whose triangles put the floor there is the right one.
+		bool  groundRefOk_{ false };
+		float groundRef_[3]{};
+		int   offsetTries_{ 0 };
+		bool  offsetGuessed_{ false };
+		float GroundErrorFor(const float* a_offset);
+		std::vector<const RE::hknpBody*> rawForOrigin_;
 
 		// Diagnostics.
 		std::unordered_set<int> loggedTypes_;

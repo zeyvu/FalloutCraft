@@ -304,6 +304,8 @@ namespace skycraft
 		regions_.clear();
 		doubtful_.clear();
 		offsetChosen_ = false;
+		offsetTries_ = 0;
+		offsetGuessed_ = false;
 		loggedGather_ = false;
 		EvictGeoms(true);  // a new world: its shapes are different ones
 		std::scoped_lock lock(mutex_);
@@ -359,6 +361,16 @@ namespace skycraft
 		playerRegion_[0] = prx;
 		playerRegion_[1] = pry;
 		playerRegion_[2] = prz;
+
+		// While the Havok origin reading isn't settled, find Fallout's floor under the player (a pick,
+		// which doesn't depend on that reading) to settle it with.
+		if (!offsetChosen_) {
+			RE::NiPoint3 hit{};
+			groundRefOk_ = PickGroundAt(a_cell, McToGame(a_playerMc.x, a_playerMc.y + 1.5, a_playerMc.z), McToGame(a_playerMc.x, a_playerMc.y - 4.0, a_playerMc.z), hit);
+			groundRef_[0] = float(a_playerMc.x);
+			groundRef_[1] = groundRefOk_ ? float(double(hit.z) / proto::kUnitsPerBlock) : 0.0f;
+			groundRef_[2] = float(a_playerMc.z);
+		}
 
 		int  done = 0;
 		bool gathered = false;
@@ -428,6 +440,8 @@ namespace skycraft
 		if (origin[0] != originSeen_[0] || origin[1] != originSeen_[1] || origin[2] != originSeen_[2]) {
 			std::memcpy(originSeen_, origin, sizeof(origin));
 			offsetChosen_ = false;
+			offsetTries_ = 0;
+			offsetGuessed_ = false;
 		}
 
 		auto&     bm = a_world->m_bodyManager;
@@ -452,6 +466,9 @@ namespace skycraft
 			if (!a_bhk->IsBodyAdded(body.m_id) || !ShapeLooksValid(body.m_shape)) {
 				continue;  // a freed or not-yet-added body
 			}
+			if (BlockCollision::Owns(body.m_shape)) {
+				continue;  // a Minecraft block we made (fo_blockcol.cpp): Minecraft has it already
+			}
 			++total;
 			std::int32_t flags = 0;
 			std::memcpy(&flags, &body.m_flags, sizeof(flags));
@@ -469,13 +486,26 @@ namespace skycraft
 			raw.push_back({ &body, layer == static_cast<int>(RE::COL_LAYER::kStairHelper) });
 		}
 
-		// Pick the origin reading: the candidate with the most bodies around the player's column.
+		rawForOrigin_.clear();
+		if (!offsetChosen_ && groundRefOk_) {
+			for (const auto& r : raw) {
+				rawForOrigin_.push_back(r.body);
+			}
+		}
+
+		// Pick the origin reading. FalloutCraft: Fallout's interiors have a small origin and a room's
+		// big pieces surround the player whichever way it is read, so counting bodies around the
+		// player chose wrong (ConcordMuseum01: everything 9 blocks off -> invisible walls). The
+		// reading is now the one whose triangles put a floor where Fallout's own pick finds it; the
+		// body count only decides when there's no pick.
 		if (!offsetChosen_) {
+			const float before[3] = { offset_[0], offset_[1], offset_[2] };
 			const float candidates[3][3] = { { 0, 0, 0 }, { origin[0], origin[1], origin[2] }, { -origin[0], -origin[1], -origin[2] } };
-			int         best = 0, bestHits = -1;
+			const bool  noOrigin = origin[0] == 0.0f && origin[1] == 0.0f && origin[2] == 0.0f;
 			int         hitsPer[3]{};
+			float       errPer[3] = { 1e9f, 1e9f, 1e9f };
 			for (int c = 0; c < 3; ++c) {
-				if (c > 0 && origin[0] == 0.0f && origin[1] == 0.0f && origin[2] == 0.0f) {
+				if (c > 0 && noOrigin) {
 					break;
 				}
 				std::memcpy(offset_, candidates[c], sizeof(offset_));
@@ -500,15 +530,42 @@ namespace skycraft
 					}
 				}
 				hitsPer[c] = hits;
-				if (hits > bestHits) {
-					bestHits = hits;
+				if (groundRefOk_) {
+					errPer[c] = GroundErrorFor(candidates[c]);
+				}
+			}
+			int best = 0;
+			for (int c = 1; c < 3 && !noOrigin; ++c) {
+				if (errPer[c] < errPer[best] - 0.05f || (errPer[c] >= 1e8f && errPer[best] >= 1e8f && hitsPer[c] > hitsPer[best])) {
 					best = c;
 				}
 			}
+			// Settled by the floor (within a quarter block), or there's no other reading; otherwise
+			// use the best guess and look again next time (up to ~200 tries, then keep it).
+			bool clear = errPer[best] < 0.25f;
+			for (int c = 0; c < 3 && !noOrigin; ++c) {
+				if (c != best && errPer[c] < errPer[best] + 0.75f) {
+					clear = false;  // another reading fits nearly as well (a floor at a coincident height)
+				}
+			}
+			const bool sure = noOrigin || clear || ++offsetTries_ > 200;
+			// A different reading than the regions already sent used: send them all again.
 			std::memcpy(offset_, candidates[best], sizeof(offset_));
-			offsetChosen_ = true;
-			REX::INFO("collision: Havok origin ({:.2f}, {:.2f}, {:.2f}); bodies around the player: as-is {}, +origin {}, -origin {} -> using {}",
-				origin[0], origin[1], origin[2], hitsPer[0], hitsPer[1], hitsPer[2], best == 0 ? "as-is" : (best == 1 ? "+origin" : "-origin"));
+			offsetChosen_ = sure;
+			const bool hadGuess = offsetGuessed_;
+			offsetGuessed_ = true;
+			if (hadGuess && std::memcmp(before, offset_, sizeof(before)) != 0) {
+				harvested_.clear();
+				regions_.clear();
+				doubtful_.clear();
+				REX::INFO("collision: origin reading changed; resending the regions around the player");
+			}
+			if (sure || offsetTries_ == 1) {
+				auto e = [](float v) { return v >= 1e8f ? std::string("-") : std::format("{:.2f}", v); };
+				REX::INFO("collision: Havok origin ({:.2f}, {:.2f}, {:.2f}); bodies around the player: as-is {}, +origin {}, -origin {}; floor error vs Fallout's pick (blocks): as-is {}, +origin {}, -origin {} -> using {}{}",
+					origin[0], origin[1], origin[2], hitsPer[0], hitsPer[1], hitsPer[2], e(errPer[0]), e(errPer[1]), e(errPer[2]),
+					best == 0 ? "as-is" : (best == 1 ? "+origin" : "-origin"), sure ? "" : " (not sure yet, will look again)");
+			}
 		}
 
 		for (const auto& r : raw) {
@@ -543,6 +600,61 @@ namespace skycraft
 			}
 			REX::INFO("collision: {} bodies in the world, {} used; by layer:{}", total, bodies_.size(), layers);
 		}
+	}
+
+	// How far (blocks) the triangles' nearest surface under the reference point is from Fallout's
+	// picked floor there, reading Havok positions with a_offset. 1e9 if no triangle is under it.
+	float Collision::GroundErrorFor(const float* a_offset)
+	{
+		float saved[3];
+		std::memcpy(saved, offset_, sizeof(saved));
+		std::memcpy(offset_, a_offset, sizeof(offset_));
+		const float px = groundRef_[0], gy = groundRef_[1], pz = groundRef_[2];
+		float       best = 1e9f;
+		for (const auto& r : rawForOrigin_) {
+			RE::hkAabb box;
+			if (!GuardedAabb(r->m_shape, &r->m_transform, &box)) {
+				continue;
+			}
+			const float mn[3] = { box.min.x, box.min.y, box.min.z }, mx[3] = { box.max.x, box.max.y, box.max.z };
+			float       a[3], b[3];
+			HkPointToMc(mn, a);
+			HkPointToMc(mx, b);
+			if (px < std::min(a[0], b[0]) - 0.5f || px > std::max(a[0], b[0]) + 0.5f || pz < std::min(a[2], b[2]) - 0.5f || pz > std::max(a[2], b[2]) + 0.5f ||
+				gy < std::min(a[1], b[1]) - 2.0f || gy > std::max(a[1], b[1]) + 2.0f) {
+				continue;
+			}
+			const Geom* geom = GetGeom(r->m_shape);
+			if (!geom) {
+				continue;
+			}
+			float xf[16];
+			std::memcpy(xf, &r->m_transform, sizeof(xf));
+			const auto& verts = geom->verts;
+			for (std::size_t t = 0; t + 2 < geom->idx.size(); t += 3) {
+				float v[3][3];
+				for (int k = 0; k < 3; ++k) {
+					float w[3];
+					XfPoint(xf, &verts[geom->idx[t + k] * 3], w);
+					HkPointToMc(w, v[k]);
+				}
+				// Height of the triangle's plane at (px, pz) if that point is inside it (XZ).
+				const float d = (v[1][2] - v[2][2]) * (v[0][0] - v[2][0]) + (v[2][0] - v[1][0]) * (v[0][2] - v[2][2]);
+				if (std::fabs(d) < 1e-6f) {
+					continue;
+				}
+				const float l0 = ((v[1][2] - v[2][2]) * (px - v[2][0]) + (v[2][0] - v[1][0]) * (pz - v[2][2])) / d;
+				const float l1 = ((v[2][2] - v[0][2]) * (px - v[2][0]) + (v[0][0] - v[2][0]) * (pz - v[2][2])) / d;
+				const float l2 = 1.0f - l0 - l1;
+				if (l0 < -1e-4f || l1 < -1e-4f || l2 < -1e-4f) {
+					continue;
+				}
+				const float h = l0 * v[0][1] + l1 * v[1][1] + l2 * v[2][1];
+				best = std::min(best, std::fabs(h - gy));
+			}
+		}
+		std::memcpy(offset_, saved, sizeof(offset_));
+		return best;
 	}
 
 	const Collision::Geom* Collision::GetGeom(const RE::hknpShape* a_shape)

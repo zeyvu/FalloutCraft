@@ -304,11 +304,13 @@ namespace skycraft
 				return false;
 			}
 			a_layer = -1;
+			bool mcBlock = false;
 			if (const auto* body = pd.GetBody()) {
 				if (a_body) {
 					*a_body = body;
 				}
 				a_layer = static_cast<int>(body->m_collisionFilterInfo & 0x7F);
+				mcBlock = BlockCollision::Owns(body->m_shape);  // Minecraft has it already: look past it
 				if (a_flags) {
 					std::memcpy(a_flags, &body->m_flags, sizeof(std::uint32_t));
 				}
@@ -318,7 +320,7 @@ namespace skycraft
 			if (a_layer < 0) {
 				a_layer = 0x7F;  // a hit without a body: not ground, but something to look past
 			}
-			return GroundLayer(a_layer);
+			return !mcBlock && GroundLayer(a_layer);
 		}
 
 		std::uint32_t WorldIdOf(RE::TESObjectCELL* a_cell)
@@ -876,6 +878,7 @@ namespace skycraft
 			settleTimer -= a_delta;
 			if (haveMc && !loading && cell && settleTimer <= 0.0f) {
 				Collision::Get().Update(cell, puppet ? McVec{ mc.x, mc.y, mc.z } : playerMc);
+				BlockCollision::Update(cell, puppet ? McVec{ mc.x, mc.y, mc.z } : playerMc);
 			}
 
 			logTimer -= a_delta;

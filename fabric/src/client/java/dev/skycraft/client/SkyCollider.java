@@ -23,10 +23,12 @@ public final class SkyCollider {
 		if (tris.isEmpty()) {
 			return onFalloutGround(player, box, step, move);
 		}
+		TriCollider.lastWall = null;
 		double[] r = TriCollider.resolve(
 			tris, (box.minX + box.maxX) * 0.5, box.minY, (box.minZ + box.maxZ) * 0.5, box.getXsize() * 0.5, box.getYsize(), step, player.onGround(),
 			move.x, move.y, move.z
 		);
+		noteStuck(move, r);
 		Vec3 result = move;
 		if (!(r[0] == move.x && r[1] == move.y && r[2] == move.z)) {
 			// The triangle pass (snapping down a slope, pushing out of a wall) can move the player into a
@@ -64,6 +66,32 @@ public final class SkyCollider {
 	}
 
 	private static long lastCatchLog;
+	private static int stuckTicks;
+	private static long lastStuckLog;
+
+	/** Logs what a wall the player keeps walking into is, so bad Fallout collision can be found. */
+	private static void noteStuck(Vec3 move, double[] r) {
+		double asked = Math.hypot(move.x, move.z);
+		double got = Math.hypot(r[0], r[2]);
+		SkyTri wall = TriCollider.lastWall;
+		if (asked < 0.05 || got > asked * 0.25 || wall == null) {
+			stuckTicks = 0;
+			return;
+		}
+		long now = System.currentTimeMillis();
+		if (++stuckTicks >= 20 && now - lastStuckLog > 5000) {
+			lastStuckLog = now;
+			double feet = TriCollider.lastWallFeet;
+			dev.skycraft.SkyCraft.LOG.info(
+				"SkyCraft: stuck against a Fallout wall: triangle y {}..{} above the feet, x {}..{} z {}..{}, normal ({}, {}, {}){}",
+				f2(wall.minY - feet), f2(wall.maxY - feet), f2(wall.minX), f2(wall.maxX), f2(wall.minZ), f2(wall.maxZ),
+				f2(wall.nx), f2(wall.ny), f2(wall.nz), wall.stairHelper ? " (stair helper)" : "");
+		}
+	}
+
+	private static String f2(double v) {
+		return String.format("%.2f", v);
+	}
 
 	/** Highest Skyrim surface at or below {@code maxAbove} over the feet at (x, y, z), or NaN. */
 	public static double groundAt(double x, double y, double z, double maxAbove) {
