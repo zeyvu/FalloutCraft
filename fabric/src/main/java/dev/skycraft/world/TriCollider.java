@@ -77,7 +77,10 @@ public final class TriCollider {
 				dy = Math.max(0.0, Math.min(dy, ceiling - (y + height)));
 			}
 		}
-		double walkUp = wasOnGround ? step : AIR_STEP;
+		// FalloutCraft: mid-air, walkable ground counts as a wall only from the step height up, so a
+		// sprint-jump into rising ground can put the feet up to a step under its surface; catch them
+		// on it then (with AIR_STEP alone they fell through the hill or the road).
+		double walkUp = wasOnGround ? step : Math.max(AIR_STEP, step);
 		double floorWalk = floor(tris, x, y, z, true, walkUp);
 		double floorAny = floor(tris, x, y, z, false, EPS);
 		double floor = Math.max(floorWalk, floorAny);

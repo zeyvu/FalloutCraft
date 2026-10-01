@@ -192,6 +192,9 @@ public final class SkyLink {
 	// ---- SkyState (read) -------------------------------------------------------------------
 
 	/** Plain snapshot of SkyState. */
+	/** FalloutCraft: the Fallout player's S.P.E.C.I.A.L. (S, P, E, C, I, A, L), or null. */
+	public static volatile int[] special;
+
 	public static final class SkyState {
 		public int seq;
 		public int flags;
@@ -202,6 +205,10 @@ public final class SkyLink {
 		public int teleportSeq;
 		public int viewportW, viewportH;
 		public float gameHour;
+		// FalloutCraft: Fallout's ground around the player (see Proto.SS_GROUND_*)
+		public float groundX0, groundZ0, groundStep;
+		public int groundN;
+		public final float[] groundY = new float[GROUND_GRID * GROUND_GRID];
 
 		public boolean inGame() {
 			return (this.flags & SKY_IN_GAME) != 0;
@@ -283,6 +290,20 @@ public final class SkyLink {
 			out.viewportW = s.get(JAVA_INT, b + SS_VIEWPORT_W);
 			out.viewportH = s.get(JAVA_INT, b + SS_VIEWPORT_H);
 			out.gameHour = s.get(JAVA_FLOAT, b + SS_GAME_HOUR);
+			out.groundX0 = s.get(JAVA_FLOAT, b + SS_GROUND_X0);
+			out.groundZ0 = s.get(JAVA_FLOAT, b + SS_GROUND_Z0);
+			out.groundStep = s.get(JAVA_FLOAT, b + SS_GROUND_STEP);
+			out.groundN = s.get(JAVA_INT, b + SS_GROUND_N);
+			for (int g = 0; g < GROUND_GRID * GROUND_GRID; g++) {
+				out.groundY[g] = s.get(JAVA_FLOAT, b + SS_GROUND_Y + 4L * g);
+			}
+			if (s.get(JAVA_BYTE, b + SS_SPECIAL_VALID) != 0) {
+				int[] sp = new int[7];
+				for (int k = 0; k < 7; k++) {
+					sp[k] = s.get(JAVA_BYTE, b + SS_SPECIAL + k) & 0xFF;
+				}
+				special = sp;
+			}
 			VarHandle.loadLoadFence();
 			int seq2 = (int) INT.getAcquire(s, b + SS_SEQ);
 			if (seq1 == seq2) {
@@ -314,6 +335,7 @@ public final class SkyLink {
 		public float bobPhase;
 		public float bobAmount;
 		public double eyeX, eyeY, eyeZ;
+		public float health; // FalloutCraft: health / max health
 		public long tickQpc;
 		public double prevX, prevY, prevZ;
 		public double curX, curY, curZ;
@@ -366,6 +388,7 @@ public final class SkyLink {
 		s.set(JAVA_FLOAT, b + MS_BOB, st.bob);
 		s.set(JAVA_FLOAT, b + MS_TICK_MS, st.tickMs);
 		s.set(JAVA_INT, b + MS_CAMERA_MODE, st.cameraMode);
+		s.set(JAVA_FLOAT, b + MS_HEALTH, st.health);
 		s.set(JAVA_FLOAT, b + MS_CAMERA_DISTANCE, st.cameraDistance);
 		INT.setRelease(s, b + MS_SEQ, seq + 2);
 	}

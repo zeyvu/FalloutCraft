@@ -27,8 +27,6 @@ namespace
 			// Present draws Minecraft's blocks from the render ring; while it doesn't run, throw the
 			// messages away so Minecraft never waits for room (that stalls its frames).
 			skycraft::Blocks::DiscardIfStale();
-			// Hit events aren't used yet (Phase 3): mark them read.
-			skycraft::link::DrainEventRing();
 		}
 	}
 
@@ -78,6 +76,7 @@ F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* a_f4se)
 	skycraft::Game::Install();
 	skycraft::Input::Install();
 	skycraft::Camera::Install();
+	skycraft::Combat::Install();
 
 	std::thread(HeartbeatLoop).detach();
 	return true;

@@ -86,8 +86,18 @@ namespace skycraft::proto
 		std::uint32_t teleportSeq;       // MC teleports its player to pos when this changes
 		std::uint32_t viewportW, viewportH;
 		float         gameHour;
+		// FalloutCraft: Fallout's own ground around the player, a kGroundGrid x kGroundGrid grid of
+		// heights (MC y; NaN where Fallout has none) starting at (groundX0, groundZ0), groundStep
+		// blocks apart; groundN = kGroundGrid when valid. Minecraft lands on it when its triangles miss.
+		float         groundX0, groundZ0, groundStep;
+		std::uint32_t groundN;
+		float         groundY[25];
+		std::uint8_t  special[7];    // FalloutCraft: S.P.E.C.I.A.L. (S, P, E, C, I, A, L)
+		std::uint8_t  specialValid;
+		std::uint8_t  groundPad[0x04];
 	};
-	static_assert(sizeof(SkyState) == 0x40);
+	static_assert(sizeof(SkyState) == 0xC0);
+	inline constexpr std::uint32_t kGroundGrid = 5;
 
 	// ---- MC -> Skyrim state @0x200 (seqlock) ------------------------------------------------
 	enum McFlags : std::uint32_t
@@ -100,6 +110,7 @@ namespace skycraft::proto
 		kMcDead = 1u << 5,
 		kMcSwimming = 1u << 6,
 		kMcFlying = 1u << 7,
+		kMcHealthValid = 1u << 8,  // FalloutCraft: McState::health is set
 	};
 
 	struct McState
@@ -116,7 +127,7 @@ namespace skycraft::proto
 		float         fovDeg;         // effective vertical FOV (includes sprint / fluid modifiers)
 		float         bobPhase;       // MC walk-bob phase (interpolated walk distance); 0 if bobbing is off
 		float         bobAmount;      // MC walk-bob amplitude
-		std::uint32_t pad4C;
+		float         health;         // FalloutCraft: MC health / max health, when kMcHealthValid
 		double        eyeX, eyeY, eyeZ;  // MC camera position (interpolated, includes sneak eye lerp)
 
 		// Raw 20 Hz physics ticks, so Skyrim can interpolate on its own frame clock exactly like

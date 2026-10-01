@@ -95,9 +95,20 @@ namespace skycraft::Hud
 			});
 		}
 
+		// Forgets the clips without releasing them: after a load (or a new HUD movie) their objects
+		// are gone, and releasing them crashed (2026-10-01 08:28). A few bytes leaked per load.
+		void Abandon()
+		{
+			auto* old = new std::vector<Clip>();
+			old->swap(clips);
+			hidden = false;
+		}
+
+		std::atomic<bool> resetRequested{ false };
+
 		void Scan(RE::IMenu* a_hud)
 		{
-			clips.clear();
+			Abandon();
 			scannedFor = a_hud;
 			auto& root = a_hud->menuObj;
 			if (!root.IsObject()) {
@@ -132,6 +143,11 @@ namespace skycraft::Hud
 		}
 	}
 
+	void Reset()
+	{
+		resetRequested = true;
+	}
+
 	// Main thread, every frame. Fallout's HUD (Scaleform) belongs to the UI thread, so all the
 	// work is handed to it as a UI task, a few times a second (touching it from here raced the UI
 	// thread).
@@ -157,9 +173,13 @@ namespace skycraft::Hud
 				return;
 			}
 			auto hud = ui->GetMenu("HUDMenu");
+			if (resetRequested.exchange(false)) {
+				scannedFor = nullptr;
+				Abandon();
+			}
 			if (!hud) {
 				scannedFor = nullptr;
-				clips.clear();
+				Abandon();
 				return;
 			}
 			if (scannedFor != hud.get()) {

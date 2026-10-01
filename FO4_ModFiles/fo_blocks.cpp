@@ -1083,6 +1083,14 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 			a_context->PSSetShaderResources(0, 2, srvs);
 			a_context->PSSetSamplers(0, 1, &sampler);
 
+			// A Minecraft point (blocks, in this world's place in Minecraft) relative to the camera,
+			// in Fallout units (double precision here, float once small).
+			const double offX = g_worldOffset.x.load(std::memory_order_relaxed), offZ = g_worldOffset.z.load(std::memory_order_relaxed);
+			auto RelativeToCamera = [&](double a_x, double a_y, double a_z, float* a_out) {
+				a_out[0] = float((a_x - offX) * proto::kUnitsPerBlock - double(cam.x));
+				a_out[1] = float(-(a_z - offZ) * proto::kUnitsPerBlock - double(cam.y));
+				a_out[2] = float(a_y * proto::kUnitsPerBlock - double(cam.z));
+			};
 			auto drawPass = [&](bool a_translucent) {
 				a_context->OMSetBlendState(a_translucent ? alphaBlend : opaqueBlend, factor, 0xFFFFFFFF);
 				a_context->OMSetDepthStencilState(a_translucent ? depthTest[reversed] : depthWrite[reversed], 0);
@@ -1094,9 +1102,7 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 					}
 					// Section corner in Fallout units, relative to the camera (double precision here).
 					ObjectConstants oc{};
-					oc.offset[0] = float(double(s.sx) * 16.0 * proto::kUnitsPerBlock - double(cam.x));
-					oc.offset[1] = float(-double(s.sz) * 16.0 * proto::kUnitsPerBlock - double(cam.y));
-					oc.offset[2] = float(double(s.sy) * 16.0 * proto::kUnitsPerBlock - double(cam.z));
+					RelativeToCamera(double(s.sx) * 16.0, double(s.sy) * 16.0, double(s.sz) * 16.0, oc.offset);
 					D3D11_MAPPED_SUBRESOURCE om{};
 					if (FAILED(a_context->Map(objectCb, 0, D3D11_MAP_WRITE_DISCARD, 0, &om))) {
 						continue;
@@ -1125,9 +1131,7 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 					return;
 				}
 				ObjectConstants oc{};
-				oc.offset[0] = float(a_mcOrigin[0] * proto::kUnitsPerBlock - double(cam.x));
-				oc.offset[1] = float(-a_mcOrigin[2] * proto::kUnitsPerBlock - double(cam.y));
-				oc.offset[2] = float(a_mcOrigin[1] * proto::kUnitsPerBlock - double(cam.z));
+				RelativeToCamera(a_mcOrigin[0], a_mcOrigin[1], a_mcOrigin[2], oc.offset);
 				D3D11_MAPPED_SUBRESOURCE om{};
 				if (FAILED(a_context->Map(objectCb, 0, D3D11_MAP_WRITE_DISCARD, 0, &om))) {
 					return;
@@ -1168,14 +1172,12 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 
 			// Dropped items, arrows, cracks and the outline, relative to the Minecraft block under the camera.
 			if (haveEntities) {
-				const double mcCam[3] = { cam.x / proto::kUnitsPerBlock, cam.z / proto::kUnitsPerBlock, -cam.y / proto::kUnitsPerBlock };
+				const double mcCam[3] = { cam.x / proto::kUnitsPerBlock + offX, cam.z / proto::kUnitsPerBlock, -cam.y / proto::kUnitsPerBlock + offZ };
 				const double origin[3] = { std::floor(mcCam[0]), std::floor(mcCam[1]), std::floor(mcCam[2]) };
 				UINT solidCount = 0, crackCount = 0, lineCount = 0;
 				if (BuildDynamic(origin, solidCount, crackCount, lineCount) && UploadDynamic(a_context)) {
 					ObjectConstants oc{};
-					oc.offset[0] = float(origin[0] * proto::kUnitsPerBlock - double(cam.x));
-					oc.offset[1] = float(-origin[2] * proto::kUnitsPerBlock - double(cam.y));
-					oc.offset[2] = float(origin[1] * proto::kUnitsPerBlock - double(cam.z));
+					RelativeToCamera(origin[0], origin[1], origin[2], oc.offset);
 					D3D11_MAPPED_SUBRESOURCE om{};
 					if (SUCCEEDED(a_context->Map(objectCb, 0, D3D11_MAP_WRITE_DISCARD, 0, &om))) {
 						std::memcpy(om.pData, &oc, sizeof(oc));

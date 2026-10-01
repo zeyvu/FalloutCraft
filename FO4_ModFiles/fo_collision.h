@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -33,9 +34,13 @@ namespace skycraft
 		// Main thread, once per frame: the player's cell and position (Minecraft coords).
 		void Update(RE::TESObjectCELL* a_cell, const McVec& a_playerMc);
 		// Main thread: harvest everything around the player again (after a fall through missing ground).
-		void Refresh() { harvested_.clear(); }
+		// Only the regions right around the player: clearing everything queued ~700 regions at once
+		// and Minecraft fell behind on the ground under the player.
+		void Refresh();
 		// Main thread, diagnostics: triangles last sent for the region holding this point (-1: never sent).
 		long long TrianglesAt(const McVec& a_p) const;
+		// Main thread, diagnostics: what our copy knows about the body Fallout's pick hit at a_point.
+		std::string Describe(const RE::hknpBody* a_body, const McVec& a_point);
 
 		static constexpr int kRegionSize = 8;  // blocks per region edge (must match the Java side)
 
@@ -76,7 +81,10 @@ namespace skycraft
 		void        GatherBodies(RE::bhkWorld* a_bhk, RE::hknpBSWorld* a_world, const McVec& a_player);
 		// False when the result was held back (the region lost most of its triangles: Fallout is
 		// probably streaming the bodies there, so Minecraft keeps the previous copy for a moment).
-		bool        Harvest(int a_rx, int a_ry, int a_rz);
+		bool        Harvest(int a_rx, int a_ry, int a_rz, std::vector<Tri>* a_sheet = nullptr);
+		// Fallout's own picks down a 1-block grid over the region: a sheet over the ground it finds,
+		// bridging the cracks and potholes Fallout's player walks over (Minecraft's feet are narrower).
+		void        BuildSheet(RE::TESObjectCELL* a_cell, int a_rx, int a_ry, int a_rz, std::vector<Tri>& a_out);
 		const Geom* GetGeom(const RE::hknpShape* a_shape);
 		void        EvictGeoms(bool a_all);
 
@@ -104,6 +112,9 @@ namespace skycraft
 		std::unordered_map<std::uint64_t, RegionRecord>                regions_;
 		std::unordered_set<std::uint64_t>                              doubtful_;      // held back; look again soon
 		std::uint64_t                                                  statHeld_{ 0 };
+		std::uint64_t                                                  statSheets_{ 0 }, statSheetTris_{ 0 };
+		std::uint64_t                                                  statQueuePeak_{ 0 }, statReplaced_{ 0 };
+		std::atomic<int>                                               playerRegion_[3]{ 0, 0, 0 };
 		std::vector<Body>                                              bodies_;
 		std::vector<std::array<int, 3>>                                offsets_;
 		std::unordered_map<const RE::hknpShape*, Geom>                 geoms_;

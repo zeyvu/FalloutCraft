@@ -62,6 +62,43 @@ public final class SkyClient {
 		return tookOver;
 	}
 
+	/**
+	 * FalloutCraft: the height of Fallout's own ground at (x, z), from the grid Fallout sends each
+	 * frame around the player (bilinear), or NaN outside it / where Fallout has none.
+	 */
+	public static double falloutGroundAt(double x, double z) {
+		int n = sky.groundN;
+		float step = sky.groundStep;
+		if (n != Proto.GROUND_GRID || !(step > 0.0F)) {
+			return Double.NaN;
+		}
+		double fx = (x - sky.groundX0) / step, fz = (z - sky.groundZ0) / step;
+		if (fx < 0 || fz < 0 || fx > n - 1 || fz > n - 1) {
+			return Double.NaN;
+		}
+		int i = Math.min((int) fx, n - 2), j = Math.min((int) fz, n - 2);
+		double tx = fx - i, tz = fz - j;
+		float a = sky.groundY[i + j * n], b = sky.groundY[i + 1 + j * n], c = sky.groundY[i + (j + 1) * n], d = sky.groundY[i + 1 + (j + 1) * n];
+		// One corner missing (a body or a gap in the way of Fallout's pick): stand in the others' mean.
+		int missing = (Float.isNaN(a) ? 1 : 0) + (Float.isNaN(b) ? 1 : 0) + (Float.isNaN(c) ? 1 : 0) + (Float.isNaN(d) ? 1 : 0);
+		if (missing > 1) {
+			return Double.NaN;
+		}
+		if (missing == 1) {
+			float mean = ((Float.isNaN(a) ? 0 : a) + (Float.isNaN(b) ? 0 : b) + (Float.isNaN(c) ? 0 : c) + (Float.isNaN(d) ? 0 : d)) / 3.0F;
+			a = Float.isNaN(a) ? mean : a;
+			b = Float.isNaN(b) ? mean : b;
+			c = Float.isNaN(c) ? mean : c;
+			d = Float.isNaN(d) ? mean : d;
+		}
+		// Corners at very different heights are an edge (a curb, a wall): no ground between them.
+		float lo = Math.min(Math.min(a, b), Math.min(c, d)), hi = Math.max(Math.max(a, b), Math.max(c, d));
+		if (hi - lo > 0.6F) {
+			return Double.NaN;
+		}
+		return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+	}
+
 	public static SkyLink.SkyState sky() {
 		return sky;
 	}
@@ -254,6 +291,8 @@ public final class SkyClient {
 	}
 
 	/** Freeze the player until Skyrim's collision around them has arrived. */
+	private static long holdLogged = -1;
+
 	private static void holdUntilReady(Minecraft minecraft) {
 		LocalPlayer player = minecraft.player;
 		if (!linked || player == null) {
@@ -268,6 +307,7 @@ public final class SkyClient {
 		}
 		if (holdPos == null) {
 			holdSince = 0;
+			holdLogged = -1;
 			return;
 		}
 		if (holdSince == 0) {
@@ -277,7 +317,19 @@ public final class SkyClient {
 		boolean known = SkyCollision.isKnown(bx, by - 1, bz) && SkyCollision.isKnown(bx, by, bz)
 			&& SkyCollision.isKnown(bx, by - SkyCollision.REGION_SIZE, bz);
 		// Release once there is actual ground below (or after a timeout, e.g. when mid-air on purpose).
-		boolean ready = known && (SkyCollision.hasSolidBelow(bx, by, bz, 12) || System.currentTimeMillis() - holdSince > 6000);
+		// FalloutCraft: Fallout's exact triangles under the feet count as ground too, and the wait is
+		// short (the player froze for up to half a minute waiting for voxel blocks).
+		double tri = SkyCollider.groundAt(holdPos.x, holdPos.y, holdPos.z, 2.5);
+		boolean triGround = !Double.isNaN(tri) && holdPos.y - tri < 3.0;
+		long held = System.currentTimeMillis() - holdSince;
+		boolean solid = SkyCollision.hasSolidBelow(bx, by, bz, 12);
+		boolean ready = (known && (triGround || solid || held > 1500)) || held > 3000;
+		if (!ready && held / 1000 != holdLogged) {
+			holdLogged = held / 1000;
+			SkyCraft.LOG.info("SkyCraft: holding the player {} s at {} {} {}: regions known {}, Fallout ground {}, voxel ground {}, in game {}, loading {}",
+				held / 1000, String.format("%.2f", holdPos.x), String.format("%.2f", holdPos.y), String.format("%.2f", holdPos.z), known,
+				Double.isNaN(tri) ? "none" : String.format("%.2f", tri), solid, sky.inGame(), sky.loading());
+		}
 		if (ready && sky.inGame() && !sky.loading()) {
 			// Skyrim's feet can sit a fraction of a voxel inside our ground layer. Minecraft's
 			// collision never pushes you out of a shape, so you'd drop through: lift out first.
@@ -355,6 +407,11 @@ public final class SkyClient {
 			}
 			if (player.getAbilities().flying) {
 				flags |= Proto.MC_FLYING;
+			}
+			// FalloutCraft: Fallout's health bar follows Minecraft's hearts.
+			if (player.getMaxHealth() > 0.0F) {
+				mc.health = player.getHealth() / player.getMaxHealth();
+				flags |= Proto.MC_HEALTH_VALID;
 			}
 			mc.x = feet.x;
 			mc.y = feet.y;

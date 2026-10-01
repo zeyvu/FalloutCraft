@@ -74,6 +74,11 @@ namespace skycraft::link
 	std::uint64_t DrainRenderRing();
 	std::uint64_t DrainEventRing();
 
+	// Nearby Fallout actors for Minecraft's hittable stand-ins (seqlock write; null/0 clears).
+	void WriteActors(const proto::ActorRecord* a_records, std::uint32_t a_count);
+	// Next Minecraft event (hits on actors, the player's death, explosions, ...). False if none.
+	bool PopEvent(proto::McEvent& a_out);
+
 	// ---- Phase 1 (full link) -------------------------------------------------------------------
 
 	// Full McState (seqlock read). False if Minecraft never wrote one or no consistent copy was had.

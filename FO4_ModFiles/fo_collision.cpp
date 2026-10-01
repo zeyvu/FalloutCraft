@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cfloat>
+#include <climits>
 #include <cstddef>
 #include <cstring>
 #include <format>
@@ -23,7 +24,7 @@ namespace skycraft
 		constexpr int   kBelow = 3;   // regions below the player
 		constexpr int   kAbove = 2;   // regions above the player
 		constexpr int   kGrid = Collision::kRegionSize * 8;  // voxels per region edge (64)
-		constexpr auto  kRefreshNear = 1000ms;  // re-send regions next to the player this often (doors etc.)
+		constexpr auto  kRefreshNear = 2000ms;  // re-send regions next to the player this often (doors etc.)
 		constexpr auto  kFrameBudget = 1500us;  // main-thread time per frame (more shows up as stutter)
 		constexpr int   kMaxHarvestsPerFrame = 2;
 		constexpr float kSteepMin = 0.1f;    // |n.y| below this is a wall: keep it fine-grained
@@ -314,6 +315,18 @@ namespace skycraft
 		cv_.notify_one();
 	}
 
+	void Collision::Refresh()
+	{
+		const int px = playerRegion_[0].load(), py = playerRegion_[1].load(), pz = playerRegion_[2].load();
+		for (int dx = -2; dx <= 2; ++dx) {
+			for (int dy = -2; dy <= 1; ++dy) {
+				for (int dz = -2; dz <= 2; ++dz) {
+					harvested_.erase(RegionKey(px + dx, py + dy, pz + dz));
+				}
+			}
+		}
+	}
+
 	long long Collision::TrianglesAt(const McVec& a_p) const
 	{
 		const int  rx = static_cast<int>(std::floor(a_p.x / kRegionSize));
@@ -326,9 +339,9 @@ namespace skycraft
 	void Collision::HkPointToMc(const float* a_hk, float* a_out) const
 	{
 		const float x = a_hk[0] + offset_[0], y = a_hk[1] + offset_[1], z = a_hk[2] + offset_[2];
-		a_out[0] = x * kBlocksPerHavok;
+		a_out[0] = float(double(x * kBlocksPerHavok) + g_worldOffset.x.load(std::memory_order_relaxed));
 		a_out[1] = z * kBlocksPerHavok;
-		a_out[2] = -y * kBlocksPerHavok;
+		a_out[2] = float(double(-y * kBlocksPerHavok) + g_worldOffset.z.load(std::memory_order_relaxed));
 	}
 
 	void Collision::Update(RE::TESObjectCELL* a_cell, const McVec& a_playerMc)
@@ -343,6 +356,9 @@ namespace skycraft
 		const int  pry = static_cast<int>(std::floor(a_playerMc.y / kRegionSize));
 		const int  prz = static_cast<int>(std::floor(a_playerMc.z / kRegionSize));
 		const auto now = Clock::now();
+		playerRegion_[0] = prx;
+		playerRegion_[1] = pry;
+		playerRegion_[2] = prz;
 
 		int  done = 0;
 		bool gathered = false;
@@ -354,16 +370,22 @@ namespace skycraft
 			// Ground that wasn't there yet (Fallout still streaming the cell in) is looked for again,
 			// under and around the player, so running into new areas doesn't fall through.
 			const bool emptyBelow = std::abs(o[0]) <= 2 && std::abs(o[2]) <= 2 && o[1] >= -2 && o[1] <= 0 && emptyRegions_.contains(key);
-			const bool doubtful = doubtful_.contains(key) && now - it->second > 300ms;
+			const bool doubtful = it != harvested_.end() && doubtful_.contains(key) && now - it->second > 300ms;
 			if (it != harvested_.end() && !(isNear && now - it->second > kRefreshNear) && !(emptyBelow && now - it->second > 2s) && !doubtful) {
 				continue;
+			}
+			// Under and right around the player: also Fallout's own picks (before taking the world
+			// lock; a pick takes it itself).
+			std::vector<Tri> sheet;
+			if (isNear) {
+				BuildSheet(a_cell, rx, ry, rz, sheet);
 			}
 			RE::BSAutoLock<RE::BSReadWriteLock, RE::BSAutoLockReadLockPolicy> lock(world->m_worldLock);
 			if (!gathered) {
 				GatherBodies(bhk, world, a_playerMc);
 				gathered = true;
 			}
-			Harvest(rx, ry, rz);
+			Harvest(rx, ry, rz, isNear ? &sheet : nullptr);
 			harvested_[key] = now;
 			if (++done >= kMaxHarvestsPerFrame || Clock::now() - now > kFrameBudget) {
 				break;
@@ -382,10 +404,15 @@ namespace skycraft
 		if (now - statsAt_ > 10s) {
 			statsAt_ = now;
 			if (statRegions_ > 0) {
-				REX::INFO("collision: {} regions harvested ({} triangles, {} held back while their ground was missing); sent {} blocks, {} triangles; {} messages dropped; {} shapes cached ({} triangles)",
-					statRegions_, statTris_, statHeld_, statSentBlocks_.load(), statSentTris_.load(), statDropped_.load(), geoms_.size(), geomTris_);
+				REX::INFO("collision: {} regions harvested ({} triangles, {} held back while their ground was missing, {} ground sheets with {} triangles; queue peak {}, {} replaced); sent {} blocks, {} triangles; {} messages dropped; {} shapes cached ({} triangles)",
+					statRegions_, statTris_, statHeld_, statSheets_, statSheetTris_, statQueuePeak_, statReplaced_, statSentBlocks_.load(), statSentTris_.load(), statDropped_.load(), geoms_.size(), geomTris_);
 			}
-			statRegions_ = statTris_ = statHeld_ = 0;
+			statRegions_ = statTris_ = statHeld_ = statSheets_ = statSheetTris_ = 0;
+			{
+				std::scoped_lock lock(mutex_);
+				statQueuePeak_ = queue_.size();
+				statReplaced_ = 0;
+			}
 			statSentBlocks_ = 0;
 			statSentTris_ = 0;
 		}
@@ -599,7 +626,146 @@ namespace skycraft
 		}
 	}
 
-	bool Collision::Harvest(int a_rx, int a_ry, int a_rz)
+	void Collision::BuildSheet(RE::TESObjectCELL* a_cell, int a_rx, int a_ry, int a_rz, std::vector<Tri>& a_out)
+	{
+		constexpr int N = kRegionSize + 1;  // grid points per edge, 1 block apart
+		float         h[N][N];
+		bool          ok[N][N];
+		const double  top = double((a_ry + 1) * kRegionSize) + 0.5, bottom = double(a_ry * kRegionSize) - 0.25;
+		for (int i = 0; i < N; ++i) {
+			for (int j = 0; j < N; ++j) {
+				const double x = double(a_rx * kRegionSize + i), z = double(a_rz * kRegionSize + j);
+				RE::NiPoint3 hit{};
+				ok[i][j] = PickGroundAt(a_cell, McToGame(x, top, z), McToGame(x, bottom, z), hit);
+				h[i][j] = ok[i][j] ? float(double(hit.z) / proto::kUnitsPerBlock) : 0.0f;
+			}
+		}
+		++statSheets_;
+		constexpr float kFlat = 0.35f;  // blocks: a cell whose corners differ more is a wall or an edge
+		for (int i = 0; i + 1 < N; ++i) {
+			for (int j = 0; j + 1 < N; ++j) {
+				const int ci[4] = { i, i + 1, i + 1, i }, cj[4] = { j, j, j + 1, j + 1 };
+				float     c[4];
+				int       valid = 0;
+				for (int k = 0; k < 4; ++k) {
+					c[k] = h[ci[k]][cj[k]];
+					valid += ok[ci[k]][cj[k]] ? 1 : 0;
+				}
+				if (valid < 3) {
+					continue;
+				}
+				// One corner missing or down in a crack: bridge it at the others' height, as
+				// Fallout's player (wider than a crack) would.
+				float hi = -1e9f, lo = 1e9f;
+				int   lowest = -1;
+				for (int k = 0; k < 4; ++k) {
+					if (!ok[ci[k]][cj[k]]) {
+						lowest = k;
+						continue;
+					}
+					if (c[k] < lo) {
+						lo = c[k];
+						if (valid == 4) {
+							lowest = k;
+						}
+					}
+					hi = std::max(hi, c[k]);
+				}
+				if (hi - lo > kFlat) {
+					// Allow exactly one corner well below the rest (a crack, a pothole edge).
+					float hi3 = -1e9f, lo3 = 1e9f;
+					for (int k = 0; k < 4; ++k) {
+						if (k != lowest && ok[ci[k]][cj[k]]) {
+							hi3 = std::max(hi3, c[k]);
+							lo3 = std::min(lo3, c[k]);
+						}
+					}
+					if (hi3 - lo3 > kFlat || valid < 4) {
+						continue;
+					}
+				}
+				if (lowest >= 0 && (!ok[ci[lowest]][cj[lowest]] || hi - c[lowest] > kFlat)) {
+					float sum = 0.0f;
+					int   n = 0;
+					for (int k = 0; k < 4; ++k) {
+						if (k != lowest && ok[ci[k]][cj[k]]) {
+							sum += c[k];
+							++n;
+						}
+					}
+					c[lowest] = n ? sum / float(n) : c[lowest];
+				}
+				float p[4][3];
+				for (int k = 0; k < 4; ++k) {
+					p[k][0] = float(a_rx * kRegionSize + ci[k]);
+					p[k][1] = c[k];
+					p[k][2] = float(a_rz * kRegionSize + cj[k]);
+				}
+				Tri t1{}, t2{};
+				const int a1[3] = { 0, 1, 2 }, a2[3] = { 0, 2, 3 };
+				for (int v = 0; v < 3; ++v) {
+					std::memcpy(t1.v + v * 3, p[a1[v]], sizeof(float) * 3);
+					std::memcpy(t2.v + v * 3, p[a2[v]], sizeof(float) * 3);
+				}
+				a_out.push_back(t1);
+				a_out.push_back(t2);
+				statSheetTris_ += 2;
+			}
+		}
+	}
+
+	std::string Collision::Describe(const RE::hknpBody* a_body, const McVec& a_point)
+	{
+		if (!a_body) {
+			return "pick gave no body";
+		}
+		const RE::hknpShape* shape = a_body->m_shape;
+		const Body*          mine = nullptr;
+		for (const auto& b : bodies_) {
+			if (b.shape == shape && std::fabs(b.xf[12] - a_body->m_transform.m_translation.x) < 0.01f) {
+				mine = &b;
+				break;
+			}
+		}
+		std::uint32_t flags = 0;
+		std::memcpy(&flags, &a_body->m_flags, sizeof(flags));
+		const int layer = static_cast<int>(a_body->m_collisionFilterInfo & 0x7F);
+		std::string out = std::format("hit body layer {} flags {:X} shape type {}: ", layer, flags, GuardedType(shape));
+		if (!mine) {
+			return out + "NOT in our body list (filtered out or not gathered) -> Minecraft never got it";
+		}
+		const Geom* geom = GetGeom(shape);
+		if (!geom) {
+			return out + "in our list but its shape did not triangulate";
+		}
+		// Triangles of that body over the point (vertical projection), and their heights.
+		int   over = 0;
+		float best = 1e9f, bestH = 0.0f;
+		for (std::size_t t = 0; t + 2 < geom->idx.size(); t += 3) {
+			float v[3][3];
+			for (int k = 0; k < 3; ++k) {
+				float w[3];
+				XfPoint(mine->xf, &geom->verts[geom->idx[t + k] * 3], w);
+				HkPointToMc(w, v[k]);
+			}
+			const float d1 = (a_point.x - v[1][0]) * (v[0][2] - v[1][2]) - (v[0][0] - v[1][0]) * (a_point.z - v[1][2]);
+			const float d2 = (a_point.x - v[2][0]) * (v[1][2] - v[2][2]) - (v[1][0] - v[2][0]) * (a_point.z - v[2][2]);
+			const float d3 = (a_point.x - v[0][0]) * (v[2][2] - v[0][2]) - (v[2][0] - v[0][0]) * (a_point.z - v[0][2]);
+			const bool  neg = d1 < 0 || d2 < 0 || d3 < 0, pos = d1 > 0 || d2 > 0 || d3 > 0;
+			if (neg && pos) {
+				continue;
+			}
+			++over;
+			const float hy = (v[0][1] + v[1][1] + v[2][1]) / 3.0f;
+			if (std::fabs(hy - float(a_point.y)) < best) {
+				best = std::fabs(hy - float(a_point.y));
+				bestH = hy;
+			}
+		}
+		return out + std::format("in our list, {} triangles, {} over the point (nearest at y {:.2f}, pick y {:.2f})", geom->idx.size() / 3, over, bestH, a_point.y);
+	}
+
+	bool Collision::Harvest(int a_rx, int a_ry, int a_rz, std::vector<Tri>* a_sheet)
 	{
 		Job job{};
 		job.rx = a_rx;
@@ -614,7 +780,10 @@ namespace skycraft
 		const float k = kBlocksPerHavok;
 		float       hkCorners[8][3];
 		for (int c = 0; c < 8; ++c) {
-			const float mx = (c & 1) ? hi[0] : lo[0], my = (c & 2) ? hi[1] : lo[1], mz = (c & 4) ? hi[2] : lo[2];
+			// Minus this world's place in Minecraft (fo_worlds.cpp).
+			const float mx = float(double((c & 1) ? hi[0] : lo[0]) - g_worldOffset.x.load(std::memory_order_relaxed));
+			const float my = (c & 2) ? hi[1] : lo[1];
+			const float mz = float(double((c & 4) ? hi[2] : lo[2]) - g_worldOffset.z.load(std::memory_order_relaxed));
 			hkCorners[c][0] = mx / k - offset_[0];
 			hkCorners[c][1] = -mz / k - offset_[1];
 			hkCorners[c][2] = my / k - offset_[2];
@@ -661,6 +830,9 @@ namespace skycraft
 			}
 		}
 
+		if (a_sheet && !a_sheet->empty()) {
+			job.tris.insert(job.tris.end(), a_sheet->begin(), a_sheet->end());
+		}
 		// A region that had ground and now comes back with (almost) none is far more likely Fallout
 		// re-streaming its bodies this frame than the ground really vanishing; sending it would open
 		// a hole under the player. Keep Minecraft's copy until the result has held for a while.
@@ -697,7 +869,18 @@ namespace skycraft
 		++statRegions_;
 		statTris_ += job.tris.size() + job.helperTris.size();
 		std::scoped_lock lock(mutex_);
-		queue_.push_back(std::move(job));
+		// A newer copy of a region still waiting replaces the old one (the worker never sends stale
+		// data, and the queue can't pile up behind Minecraft).
+		auto same = std::find_if(queue_.begin(), queue_.end(), [&](const Job& a_job) {
+			return !a_job.clear && a_job.rx == job.rx && a_job.ry == job.ry && a_job.rz == job.rz;
+		});
+		if (same != queue_.end()) {
+			*same = std::move(job);
+			++statReplaced_;
+		} else {
+			queue_.push_back(std::move(job));
+		}
+		statQueuePeak_ = std::max<std::uint64_t>(statQueuePeak_, queue_.size());
 		cv_.notify_one();
 		return true;
 	}
@@ -711,8 +894,25 @@ namespace skycraft
 			{
 				std::unique_lock lock(mutex_);
 				cv_.wait(lock, [this] { return !queue_.empty(); });
-				job = std::move(queue_.front());
-				queue_.pop_front();
+				// The region nearest the player first (a clear always goes first, in order).
+				auto best = queue_.begin();
+				if (!best->clear) {
+					const int px = playerRegion_[0].load(), py = playerRegion_[1].load(), pz = playerRegion_[2].load();
+					int       bestD = INT_MAX;
+					for (auto it = queue_.begin(); it != queue_.end(); ++it) {
+						if (it->clear) {
+							best = it;
+							break;
+						}
+						const int d = std::abs(it->rx - px) + std::abs(it->ry - py) * 2 + std::abs(it->rz - pz);
+						if (d < bestD) {
+							bestD = d;
+							best = it;
+						}
+					}
+				}
+				job = std::move(*best);
+				queue_.erase(best);
 			}
 			try {
 				if (job.clear) {

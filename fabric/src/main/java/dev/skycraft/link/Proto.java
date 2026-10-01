@@ -144,6 +144,15 @@ public final class Proto {
 	public static final long SS_VIEWPORT_W = 0x34;
 	public static final long SS_VIEWPORT_H = 0x38;
 	public static final long SS_GAME_HOUR = 0x3C;
+	// FalloutCraft: Fallout's ground around the player, a 5x5 grid of heights (MC y, NaN = none)
+	public static final long SS_GROUND_X0 = 0x40;
+	public static final long SS_GROUND_Z0 = 0x44;
+	public static final long SS_GROUND_STEP = 0x48;
+	public static final long SS_GROUND_N = 0x4C;
+	public static final long SS_GROUND_Y = 0x50;
+	public static final int GROUND_GRID = 5;
+	public static final long SS_SPECIAL = 0xB4; // FalloutCraft: S.P.E.C.I.A.L., 7 bytes
+	public static final long SS_SPECIAL_VALID = 0xBB;
 
 	public static final int SKY_IN_GAME = 1;
 	public static final int SKY_MENU_OPEN = 1 << 1;
@@ -180,6 +189,7 @@ public final class Proto {
 	public static final long MS_TICK_MS = 0xB8;
 	public static final long MS_CAMERA_MODE = 0xC0;
 	public static final long MS_CAMERA_DISTANCE = 0xC4;
+	public static final long MS_HEALTH = 0x4C; // FalloutCraft: health / max health (MC_HEALTH_VALID)
 
 	public static final int MC_IN_WORLD = 1;
 	public static final int MC_SCREEN_OPEN = 1 << 1;
@@ -189,6 +199,7 @@ public final class Proto {
 	public static final int MC_DEAD = 1 << 5;
 	public static final int MC_SWIMMING = 1 << 6;
 	public static final int MC_FLYING = 1 << 7;
+	public static final int MC_HEALTH_VALID = 1 << 8; // FalloutCraft: McState health is set
 
 	// Overlay
 	public static final long OC_STATE = 0x00;

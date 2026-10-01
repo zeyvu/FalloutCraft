@@ -79,6 +79,9 @@ public final class SkyCombat {
 		ServerLevel level = players.getFirst().level();
 		for (ServerPlayer player : players) {
 			pickUpNearby(player);
+			if (server.getTickCount() % 20 == 0) {
+				FalloutSpecial.apply(player);
+			}
 		}
 		if (SkyLink.readActors(ACTORS)) {
 			sync(level);
@@ -191,7 +194,9 @@ public final class SkyCombat {
 		}
 		ServerLevel level = player.level();
 		SkyrimActorEntity attacker = PROXIES.get(attackerFormId);
-		if (attacker != null && attacker.distanceToSqr(player) > 24.0 * 24.0) {
+		// FalloutCraft: Fallout's gunmen shoot from far off; up to the actor table's range (80 blocks)
+		// the attacker stays known, so armour and shields work against their bullets too.
+		if (attacker != null && attacker.distanceToSqr(player) > 96.0 * 96.0) {
 			attacker = null; // a guest's own NPC with the same form id as one of the host's
 		}
 		DamageSources sources = level.damageSources();

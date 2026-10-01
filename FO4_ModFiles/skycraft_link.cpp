@@ -2,7 +2,10 @@
 
 #include "skycraft_protocol.h"
 
+#define NOMINMAX  // std::min / std::max below
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#undef ERROR
 
 #include <algorithm>
 #include <atomic>
@@ -301,6 +304,44 @@ namespace skycraft::link
 	std::uint64_t DrainEventRing()
 	{
 		return DrainRing(proto::kOffEventRing, proto::kEventRingHeadOff, proto::kEventRingTailOff);
+	}
+
+	void WriteActors(const proto::ActorRecord* a_records, std::uint32_t a_count)
+	{
+		if (!g_base) {
+			return;
+		}
+		auto*                          table = At<proto::ActorTable>(proto::kOffActorTable);
+		std::atomic_ref<std::uint32_t> seq(table->seq);
+		const std::uint32_t            s = seq.load(std::memory_order_relaxed);
+		seq.store(s + 1, std::memory_order_relaxed);
+		std::atomic_thread_fence(std::memory_order_release);
+		const std::uint32_t count = a_records ? (std::min)(a_count, proto::kMaxActors) : 0u;
+		table->count = count;
+		if (count) {
+			std::memcpy(table->actors, a_records, sizeof(proto::ActorRecord) * count);
+		}
+		seq.store(s + 2, std::memory_order_release);
+	}
+
+	bool PopEvent(proto::McEvent& a_out)
+	{
+		if (!g_base) {
+			return false;
+		}
+		std::atomic_ref<std::uint64_t> headRef(*At<std::uint64_t>(proto::kOffEventRing + proto::kEventRingHeadOff));
+		std::atomic_ref<std::uint64_t> tailRef(*At<std::uint64_t>(proto::kOffEventRing + proto::kEventRingTailOff));
+		const std::uint64_t            head = headRef.load(std::memory_order_acquire);
+		std::uint64_t                  tail = tailRef.load(std::memory_order_relaxed);
+		if (tail >= head) {
+			return false;
+		}
+		if (head - tail > proto::kEventRingEntries) {
+			tail = head - proto::kEventRingEntries;  // overrun: keep the newest
+		}
+		a_out = At<proto::McEvent>(proto::kOffEventRing + proto::kEventRingDataOff)[tail & (proto::kEventRingEntries - 1)];
+		tailRef.store(tail + 1, std::memory_order_release);
+		return true;
 	}
 
 	bool SendSyntheticFloor(double a_x, double a_y, double a_z, std::uint32_t a_epoch)

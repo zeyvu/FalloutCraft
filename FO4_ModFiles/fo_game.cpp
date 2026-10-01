@@ -10,6 +10,7 @@
 #include "fo_common.h"
 
 #include <chrono>
+#include <limits>
 #include <cstring>
 #include <format>
 #include <string>
@@ -55,6 +56,13 @@ namespace skycraft
 		bool          havePrevFeet = false;
 		int           rescues = 0;
 		float         lastDepth = 0.0f;
+		int           sinking = 0;
+		// Fallout's surface where Minecraft last stood level with it (game z), and since when.
+		float         trustedZ = 0.0f;
+		float         trustedAge = 99.0f;
+		float         dipLogTimer = 0.0f;
+		float         groundRef = 0.0f;     // Fallout's ground under Minecraft's feet last frame (MC y)
+		float         groundRefAge = 99.0f;       // frames in a row the feet went deeper under Fallout's surface
 		RE::NiPoint3  lastRescueAt{};
 		float         sinceRescue = 1e9f;  // how far below Fallout's surface the feet were last frame
 		// Where Minecraft last stood on its own ground: its collision there is known to work, so a
@@ -282,7 +290,8 @@ namespace skycraft
 
 		// Fallout's own collision along a segment (game units): where it first meets a static
 		// surface (ground, floors, rocks). Actors, the player's capsule and loose objects don't count.
-		bool PickGround(RE::TESObjectCELL* a_cell, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to, RE::NiPoint3& a_hit, int& a_layer, std::uint32_t* a_flags = nullptr)
+		bool PickGround(RE::TESObjectCELL* a_cell, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to, RE::NiPoint3& a_hit, int& a_layer, std::uint32_t* a_flags = nullptr,
+			const RE::hknpBody** a_body = nullptr)
 		{
 			if (!a_cell) {
 				return false;
@@ -290,23 +299,26 @@ namespace skycraft
 			RE::bhkPickData pd;
 			pd.SetStartEnd(a_from, a_to);
 			pd.castQuery.m_filterData.m_collisionFilterInfo = static_cast<std::uint32_t>(RE::COL_LAYER::kPathingPick);
-			a_cell->Pick(pd);
+			(void)a_cell->Pick(pd);
 			if (!pd.HasHit()) {
 				return false;
 			}
 			a_layer = -1;
 			if (const auto* body = pd.GetBody()) {
+				if (a_body) {
+					*a_body = body;
+				}
 				a_layer = static_cast<int>(body->m_collisionFilterInfo & 0x7F);
 				if (a_flags) {
 					std::memcpy(a_flags, &body->m_flags, sizeof(std::uint32_t));
 				}
 			}
-			if (!GroundLayer(a_layer)) {
-				return false;
-			}
 			const float f = std::clamp(pd.GetHitFraction(), 0.0f, 1.0f);
-			a_hit = a_from + (a_to - a_from) * f;
-			return true;
+			a_hit = a_from + (a_to - a_from) * f;  // set even when it isn't ground (callers may look past it)
+			if (a_layer < 0) {
+				a_layer = 0x7F;  // a hit without a body: not ground, but something to look past
+			}
+			return GroundLayer(a_layer);
 		}
 
 		std::uint32_t WorldIdOf(RE::TESObjectCELL* a_cell)
@@ -442,6 +454,7 @@ namespace skycraft
 
 			const bool mcAlive = link::MinecraftAlive();
 			const bool haveMc = mcAlive && link::ReadMcStateFull(mc);
+			st.mcHealth = haveMc && (mc.flags & proto::kMcHealthValid) && !(mc.flags & proto::kMcDead) ? std::clamp(mc.health, 0.0f, 1.0f) : -1.0f;
 			const auto mcPid = link::McPid();
 			const bool newMcProcess = mcAlive && mcPid != 0 && mcPid != lastMcPid;
 			if (mcAlive) {
@@ -497,6 +510,7 @@ namespace skycraft
 				if (id != worldId) {
 					REX::INFO("world changed {:08X} -> {:08X}", worldId, id);
 					worldId = id;
+					Worlds::Select(cell);  // its own place in Minecraft's world
 					++epoch;
 					Collision::Get().Reset(epoch);
 					teleportPending = true;
@@ -522,8 +536,14 @@ namespace skycraft
 				if (takeoverNow) {
 					REX::INFO("Fallout takes the player ({})", takeoverNow);
 				} else {
-					REX::INFO("Fallout hands the player back");
-					teleportPending = true;  // Minecraft picks up wherever Fallout left the player
+					// Minecraft picks up wherever Fallout left the player - unless Fallout didn't move
+					// them (the Pip-Boy): then Minecraft carries on from where it is, instead of being
+					// put back to the slightly older spot Fallout's player was shown at.
+					const bool moved = !haveLastSet || current.GetDistance(lastSetPos) > 100.0f;
+					REX::INFO("Fallout hands the player back{}", moved ? "; Minecraft follows" : "");
+					if (moved) {
+						teleportPending = true;
+					}
 				}
 			}
 			takeover = takeoverNow;
@@ -566,7 +586,7 @@ namespace skycraft
 						controller->fallTime = 0.0f;
 					}
 				}
-				if (settleWait > 4.0f && haveSafeGround && pinned) {
+				if (settleWait > 1.5f && haveSafeGround && pinned) {
 					REX::WARN("Minecraft has held the player {:.0f} s without finding ground at ({:.0f}, {:.0f}, {:.0f}); moving both players back to ({:.0f}, {:.0f}, {:.0f})",
 						settleWait, current.x, current.y, current.z, safeGround.x, safeGround.y, safeGround.z);
 					a_player->SetPosition(safeGround, true);
@@ -634,8 +654,8 @@ namespace skycraft
 			// it), so if they did, its copy had a hole there: stop them on Fallout's surface right away,
 			// before any fall builds up.
 			if (puppet && airborne && havePrevFeet && feetNow.z < prevFeet.z - 0.5f) {
-				const float dx = feetNow.x - prevFeet.x, dy = feetNow.y - prevFeet.y;
-				if (dx * dx + dy * dy < 300.0f * 300.0f) {
+				const float mx = feetNow.x - prevFeet.x, my = feetNow.y - prevFeet.y;
+				if (mx * mx + my * my < 300.0f * 300.0f) {
 					// From just above last frame's feet (feet resting slightly inside a floor aren't
 					// "through" it) - or, once below the ground they jumped from, from that height, so a
 					// slow sink through a floor over several frames is caught too.
@@ -647,11 +667,16 @@ namespace skycraft
 					RE::NiPoint3       hit{};
 					int                layer = -1;
 					std::uint32_t      bodyFlags = 0;
-					const bool  below = PickGround(cell, from, feetNow, hit, layer, &bodyFlags);
+					const RE::hknpBody* hitBody = nullptr;
+					const bool  below = PickGround(cell, from, feetNow, hit, layer, &bodyFlags, &hitBody);
 					const float depth = below ? hit.z - feetNow.z : 0.0f;
 					// Steep ground is block-coarsened for Minecraft, so feet a little under Fallout's
 					// surface happen while running downhill: through means deep, or getting deeper.
-					const bool through = depth > 105.0f || (depth > 45.0f && lastDepth > 30.0f && depth > lastDepth);
+					// Minecraft stands up to about a block under Fallout's surface on steep ground (its
+					// voxel copy is coarser there): that is not falling through. Through means well
+					// over a block deep, or sinking deeper frame after frame.
+					sinking = (depth > lastDepth + 4.0f && depth > 30.0f) ? sinking + 1 : 0;
+					const bool through = depth > 160.0f || (depth > 110.0f && sinking >= 4);
 					lastDepth = depth;
 					if (through) {
 						rescue = true;
@@ -661,6 +686,7 @@ namespace skycraft
 						const auto hitMc = GameToMc({ hit.x, hit.y, hit.z - 10.0f });
 						REX::WARN("  Minecraft was sent {} triangles for the region there ({}, {}, {})", Collision::Get().TrianglesAt(hitMc),
 							static_cast<int>(std::floor(hitMc.x / 8)), static_cast<int>(std::floor(hitMc.y / 8)), static_cast<int>(std::floor(hitMc.z / 8)));
+						REX::WARN("  {}", Collision::Get().Describe(hitBody, GameToMc(hit)));
 					}
 				}
 			}
@@ -703,10 +729,12 @@ namespace skycraft
 				havePrevFeet = true;
 				if (!airborne) {
 					lastDepth = 0.0f;
+					sinking = 0;
 				}
 			} else {
 				havePrevFeet = false;
 				lastDepth = 0.0f;
+				sinking = 0;
 			}
 
 			if (!puppet) {
@@ -715,8 +743,33 @@ namespace skycraft
 				Camera::Set(false, 0, RE::NiPoint3{}, 0.0f, 0.0f, 0.0f);
 			}
 
+			// Minecraft's feet sometimes dip up to a block or so under the road for a moment (its
+			// exact-triangle collider and Fallout's surface disagree for a tick or two) and come back
+			// up by themselves. Fallout's player and the camera stay on Fallout's surface meanwhile,
+			// instead of sinking into the road and popping back up.
+			float lift = 0.0f;
+			trustedAge += a_delta;
+			dipLogTimer -= a_delta;
 			if (puppet) {
-				const auto pos = McToGame(feetX, feetY, feetZ);
+				RE::NiPoint3 ground{};
+				if (PickGroundAt(cell, { feetNow.x, feetNow.y, feetNow.z + 120.0f }, { feetNow.x, feetNow.y, feetNow.z - 30.0f }, ground)) {
+					const float d = ground.z - feetNow.z;
+					if (!airborne && std::fabs(d) < 10.0f) {
+						trustedZ = ground.z;
+						trustedAge = 0.0f;
+					} else if (d > 3.0f && d < 120.0f && trustedAge < 3.0f && std::fabs(ground.z - trustedZ) < 40.0f) {
+						lift = d;
+						if (d > 40.0f && dipLogTimer <= 0.0f) {
+							dipLogTimer = 2.0f;
+							REX::INFO("Minecraft's feet dipped {:.0f} units under Fallout's surface (Minecraft y {:.3f}, ticks {:.3f} -> {:.3f}, {}); showing the player on the surface",
+								d, mc.y, mc.prevY, mc.curY, airborne ? "airborne" : "on ground");
+						}
+					}
+				}
+			}
+
+			if (puppet) {
+				const auto pos = McToGame(feetX, feetY + lift / proto::kUnitsPerBlock, feetZ);
 				a_player->SetPosition(pos, true);
 				if (auto* controller = CharController(a_player)) {
 					// Minecraft moves the player; Fallout keeps no momentum or fall damage of its own.
@@ -729,7 +782,7 @@ namespace skycraft
 
 				// Minecraft's F5 view: behind the player, or in front looking back. Its zoom pulls in the
 				// moment something is behind the player and eases back out (as Minecraft's does).
-				st.feetX = feetX, st.feetY = feetY, st.feetZ = feetZ;
+				st.feetX = feetX, st.feetY = feetY + lift / proto::kUnitsPerBlock, st.feetZ = feetZ;
 				st.feetValid = true;
 				st.cameraMode = static_cast<int>(mc.cameraMode);
 				{
@@ -741,7 +794,7 @@ namespace skycraft
 					}
 					zoomMode = mc.cameraMode;
 					const float eyeHeight = mc.eyeHeight > 0.1f ? mc.eyeHeight : 1.62f;
-					const auto  eye = McToGame(feetX, feetY + eyeHeight, feetZ);
+					const auto  eye = McToGame(feetX, feetY + lift / proto::kUnitsPerBlock + eyeHeight, feetZ);
 					Camera::Set(detached, static_cast<int>(mc.cameraMode), eye, McYawToHeading(st.yaw), st.pitch * kDegToRad,
 						zoom * static_cast<float>(proto::kUnitsPerBlock));
 				}
@@ -770,7 +823,55 @@ namespace skycraft
 			if (auto* calendar = RE::Calendar::GetSingleton(); calendar && calendar->gameHour) {
 				sky.gameHour = calendar->gameHour->GetValue();
 			}
+			// Fallout's own ground around Minecraft's player, for Minecraft to land on when its copy of
+			// the triangles misses (sprint-jump landings, seams in the road).
+			if (puppet && cell) {
+				constexpr float kStep = 0.5f;
+				const int       n = static_cast<int>(proto::kGroundGrid);
+				const double    x0 = std::floor(mc.x / kStep) * kStep - kStep * (n / 2);
+				const double    z0 = std::floor(mc.z / kStep) * kStep - kStep * (n / 2);
+				// From a step above the feet (or above where the ground just was, if the feet are
+				// already under it) down to 3 blocks below.
+				const double from = std::max(mc.y, groundRefAge < 1.0f ? double(groundRef) : mc.y) + 0.6;
+				const double to = mc.y - 3.0;
+				for (int j = 0; j < n; ++j) {
+					for (int i = 0; i < n; ++i) {
+						const double x = x0 + i * kStep, z = z0 + j * kStep;
+						RE::NiPoint3 hit{};
+						float        y = std::numeric_limits<float>::quiet_NaN();
+						if (PickGroundAt(cell, McToGame(x, from, z), McToGame(x, to, z), hit)) {
+							y = float(double(hit.z) / proto::kUnitsPerBlock);
+						}
+						sky.groundY[i + j * n] = y;
+					}
+				}
+				sky.groundX0 = float(x0);
+				sky.groundZ0 = float(z0);
+				sky.groundStep = kStep;
+				sky.groundN = proto::kGroundGrid;
+				const float center = sky.groundY[(n / 2) + (n / 2) * n];
+				if (center == center) {
+					groundRef = center;
+					groundRefAge = 0.0f;
+				}
+			}
+			groundRefAge += a_delta;
+			// Fallout's S.P.E.C.I.A.L. for Minecraft's player (strength, speed, health, ...).
+			if (auto* avs = RE::ActorValue::GetSingleton()) {
+				RE::ActorValueInfo* special[7] = { avs->strength, avs->perception, avs->endurance, avs->charisma, avs->intelligence, avs->agility, avs->luck };
+				bool ok = true;
+				for (int k = 0; k < 7; ++k) {
+					if (!special[k]) {
+						ok = false;
+						break;
+					}
+					sky.special[k] = static_cast<std::uint8_t>(std::clamp(a_player->GetActorValue(*special[k]), 0.0f, 20.0f));
+				}
+				sky.specialValid = ok ? 1 : 0;
+			}
 			link::WriteSkyState(sky);
+
+			Combat::PerFrame(a_player, puppet && !st.falloutMenuOpen, a_delta);
 
 			settleTimer -= a_delta;
 			if (haveMc && !loading && cell && settleTimer <= 0.0f) {
@@ -803,6 +904,29 @@ namespace skycraft
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
+	}
+
+	bool PickGroundAt(RE::TESObjectCELL* a_cell, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to, RE::NiPoint3& a_hit)
+	{
+		// Bodies, the player's capsule and other non-ground things in the way: look past them.
+		RE::NiPoint3 from = a_from;
+		for (int attempt = 0; attempt < 3; ++attempt) {
+			int layer = -1;
+			if (PickGround(a_cell, from, a_to, a_hit, layer)) {
+				return true;
+			}
+			if (layer < 0) {
+				return false;  // nothing hit at all
+			}
+			// Something that isn't ground was hit first: start again just past it.
+			const RE::NiPoint3 dir = a_to - from;
+			const float        len = dir.Length();
+			if (len < 1.0f || (a_to - a_hit).Length() < 4.0f) {
+				return false;
+			}
+			from = a_hit + dir * (2.0f / len);
+		}
+		return false;
 	}
 
 	namespace Game
@@ -853,6 +977,7 @@ namespace skycraft
 			haveLastSet = false;
 			haveSafeGround = haveGround = pinned = false;
 			State().lookInitialized = false;
+			Hud::Reset();
 		}
 	}
 }
