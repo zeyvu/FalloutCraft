@@ -194,7 +194,10 @@ public final class SkyClient {
 	private static boolean gaveUpWaiting;
 
 	private static void quitWithSkyrim(Minecraft minecraft) {
-		int pid = SkyLink.skyrimPid();
+		// FalloutCraft: the plugin flips bit 30 of its pid to say "send everything again" (a save was
+		// loaded); the process is the same. Reading it as a pid made Minecraft think the game had
+		// closed and quit 5 s later (only outside `gradlew runClient`, which turns this check off).
+		int pid = SkyLink.skyrimPid() & ~0x40000000;
 		long now = System.currentTimeMillis();
 		if (QUIT_WITH_SKYRIM && START_HIDDEN && pid == 0 && !tookOver && !gaveUpWaiting && now - STARTED_AT > NEVER_CONNECTED_QUIT_MS) {
 			gaveUpWaiting = true;
