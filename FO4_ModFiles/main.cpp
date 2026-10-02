@@ -77,6 +77,7 @@ F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* a_f4se)
 	skycraft::Input::Install();
 	skycraft::Camera::Install();
 	skycraft::Combat::Install();
+	skycraft::Scavenge::Install();
 
 	std::thread(HeartbeatLoop).detach();
 	return true;

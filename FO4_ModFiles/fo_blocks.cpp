@@ -59,6 +59,7 @@ cbuffer Frame : register(b0)
 	row_major float4x4 viewProj;  // camera-relative Fallout units -> clip
 	float4 depthAB;               // x: A, y: B (depth = A + B / w), z: occlusion on, w: -
 	float4 lighting;              // x: daylight 0..1, y: darkest light, z: brightness, w: -
+	float4 camDug;                // camera in Minecraft blocks, relative to the dug-cell volume's corner; w: volume valid
 };
 cbuffer Object : register(b1)
 {
@@ -66,6 +67,7 @@ cbuffer Object : register(b1)
 };
 Texture2D atlas : register(t0);
 Texture2D<float> sceneDepth : register(t1);
+Texture3D<uint> dugCells : register(t2);  // FalloutCraft: cells dug out of Fallout's world around the camera (x, y, z)
 SamplerState atlasSampler : register(s0);
 
 struct VSIn
@@ -83,6 +85,7 @@ struct VSOut
 	float4 color : COLOR0;
 	float viewW : TEXCOORD1;
 	nointerpolation uint flags : TEXCOORD2;
+	float3 rel : TEXCOORD3;   // camera-relative Fallout position
 };
 
 VSOut VSMain(VSIn i)
@@ -92,6 +95,7 @@ VSOut VSMain(VSIn i)
 	float3 g = float3(i.pos.x * 70.0, -i.pos.z * 70.0, i.pos.y * 70.0) + offset.xyz;
 	o.pos = mul(viewProj, float4(g, 1.0));
 	o.viewW = o.pos.w;
+	o.rel = g;
 	o.uv = i.uv;
 	o.flags = i.flags;
 
@@ -114,7 +118,22 @@ float4 Shade(VSOut i)
 		float sceneW = depthAB.y / (d - depthAB.x);
 		// Sky and anything unreadable count as infinitely far.
 		// Depths at the near plane (cleared buffers, first-person geometry) say nothing about walls.
-		if (sceneW > 20.0 && i.viewW > sceneW * 1.002 + 1.5) discard;
+		if (sceneW > 20.0 && i.viewW > sceneW * 1.002 + 1.5) {
+			// FalloutCraft: behind Fallout's surface. If that surface was dug out (Fallout still draws
+			// its land there), the hole's Minecraft walls and floor show through it.
+			bool hole = false;
+			if (camDug.w > 0.5) {
+				float3 surface = i.rel * (sceneW / i.viewW);  // where the ray meets Fallout's surface
+				float3 dir = normalize(i.rel);
+				[unroll] for (int k = 0; k < 2; ++k) {
+					float3 f = surface + dir * (k == 0 ? 4.0 : 20.0);  // just past it
+					float3 mc = camDug.xyz + float3(f.x, f.z, -f.y) / 70.0;
+					int3 c = int3(floor(mc));
+					if (all(c >= 0) && all(c < int3(64, 32, 64)) && dugCells.Load(int4(c, 0)) != 0) hole = true;
+				}
+			}
+			if (!hole) discard;
+		}
 	}
 	float4 tex = (i.flags & 4) != 0 ? float4(1, 1, 1, 1)
 	           : (i.flags & 8) != 0 ? atlas.SampleLevel(atlasSampler, i.uv, 0)
@@ -132,6 +151,7 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 			float viewProj[4][4];
 			float depthAB[4];
 			float lighting[4];
+			float camDug[4];
 		};
 
 		struct alignas(16) ObjectConstants
@@ -166,6 +186,13 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 		ID3D11Texture2D*          atlasTex = nullptr;
 		ID3D11ShaderResourceView* atlasSrv = nullptr;
 		bool                      atlasMipsStale = false;
+		// FalloutCraft: dug cells around the camera, for seeing into holes through Fallout's land.
+		ID3D11Texture3D*          dugTex = nullptr;
+		ID3D11ShaderResourceView* dugSrv = nullptr;
+		std::uint64_t             dugVersion = ~0ull;
+		std::int32_t              dugOrigin[3]{ INT32_MIN, 0, 0 };
+		bool                      dugAny = false;
+		std::vector<std::uint8_t> dugScratch;
 		bool                      initFailed = false;
 
 		std::unordered_map<std::uint64_t, Section> sections;
@@ -561,6 +588,9 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 			case proto::kRenSolids:
 				BlockCollision::OnSolids(a_data, a_bytes);  // FalloutCraft: builds NPCs collide with
 				break;
+			case proto::kRenDug:
+				Dig::OnDug(a_data, a_bytes);  // FalloutCraft: cells dug out of Fallout's world
+				break;
 			default:
 				break;  // entities, avatar, lights, solids: later phases
 			}
@@ -586,7 +616,7 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 			UINT                      stride = 0, offset = 0;
 			ID3D11VertexShader*       vsh = nullptr;
 			ID3D11PixelShader*        psh = nullptr;
-			ID3D11ShaderResourceView* srv[2]{};
+			ID3D11ShaderResourceView* srv[3]{};
 			ID3D11SamplerState*       smp = nullptr;
 			ID3D11Buffer*             vcb[2]{};
 			ID3D11Buffer*             pcb[2]{};
@@ -603,7 +633,7 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 				c->IAGetVertexBuffers(0, 1, &vb, &stride, &offset);
 				c->VSGetShader(&vsh, nullptr, nullptr);
 				c->PSGetShader(&psh, nullptr, nullptr);
-				c->PSGetShaderResources(0, 2, srv);
+				c->PSGetShaderResources(0, 3, srv);
 				c->PSGetSamplers(0, 1, &smp);
 				c->VSGetConstantBuffers(0, 2, vcb);
 				c->PSGetConstantBuffers(0, 2, pcb);
@@ -621,7 +651,7 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 				c->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
 				c->VSSetShader(vsh, nullptr, 0);
 				c->PSSetShader(psh, nullptr, 0);
-				c->PSSetShaderResources(0, 2, srv);
+				c->PSSetShaderResources(0, 3, srv);
 				c->PSSetSamplers(0, 1, &smp);
 				c->VSSetConstantBuffers(0, 2, vcb);
 				c->PSSetConstantBuffers(0, 2, pcb);
@@ -638,6 +668,7 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 				Release(psh);
 				Release(srv[0]);
 				Release(srv[1]);
+				Release(srv[2]);
 				Release(smp);
 				Release(vcb[0]);
 				Release(vcb[1]);
@@ -1056,6 +1087,36 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 					w2c[3][0], w2c[3][1], w2c[3][2], w2c[3][3], fc.depthAB[0], fc.depthAB[1], reversed ? "reversed" : "normal", sceneDepth ? "found" : "NOT found (blocks drawn over everything)");
 			}
 			fc.depthAB[2] = sceneDepth ? 1.0f : 0.0f;
+			{
+				// The camera in Minecraft blocks; the 64x32x64 volume follows it in 16-block steps.
+				const double cx = cam.x / proto::kUnitsPerBlock + g_worldOffset.x.load(std::memory_order_relaxed);
+				const double cy = cam.z / proto::kUnitsPerBlock;
+				const double cz = -cam.y / proto::kUnitsPerBlock + g_worldOffset.z.load(std::memory_order_relaxed);
+				const std::int32_t ox = std::int32_t(std::floor(cx / 16.0)) * 16 - 32, oy = std::int32_t(std::floor(cy / 16.0)) * 16 - 16,
+								   oz = std::int32_t(std::floor(cz / 16.0)) * 16 - 32;
+				const auto version = Dig::Version();
+				if (version != dugVersion || ox != dugOrigin[0] || oy != dugOrigin[1] || oz != dugOrigin[2]) {
+					dugVersion = version;
+					dugOrigin[0] = ox, dugOrigin[1] = oy, dugOrigin[2] = oz;
+					dugScratch.assign(64 * 32 * 64, 0);
+					dugAny = Dig::FillVolume(Dig::CurrentWorld(), ox, oy, oz, 64, 32, 64, dugScratch.data());
+					if (!dugTex) {
+						D3D11_TEXTURE3D_DESC td{};
+						td.Width = 64, td.Height = 32, td.Depth = 64, td.MipLevels = 1;
+						td.Format = DXGI_FORMAT_R8_UINT;
+						td.Usage = D3D11_USAGE_DEFAULT;
+						td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+						if (SUCCEEDED(device->CreateTexture3D(&td, nullptr, &dugTex))) {
+							device->CreateShaderResourceView(dugTex, nullptr, &dugSrv);
+						}
+					}
+					if (dugTex) {
+						a_context->UpdateSubresource(dugTex, 0, nullptr, dugScratch.data(), 64, 64 * 32);
+					}
+				}
+				fc.camDug[0] = float(cx - ox), fc.camDug[1] = float(cy - oy), fc.camDug[2] = float(cz - oz);
+				fc.camDug[3] = (dugAny && dugSrv) ? 1.0f : 0.0f;
+			}
 			fc.lighting[0] = Daylight();
 			fc.lighting[1] = 0.12f;
 			fc.lighting[2] = 1.0f;
@@ -1083,8 +1144,8 @@ float4 PSTranslucent(VSOut i) : SV_Target { return Shade(i); }
 			ID3D11Buffer* cbs[2] = { frameCb, objectCb };
 			a_context->VSSetConstantBuffers(0, 2, cbs);
 			a_context->PSSetConstantBuffers(0, 2, cbs);
-			ID3D11ShaderResourceView* srvs[2] = { atlasSrv, sceneDepth };
-			a_context->PSSetShaderResources(0, 2, srvs);
+			ID3D11ShaderResourceView* srvs[3] = { atlasSrv, sceneDepth, dugSrv };
+			a_context->PSSetShaderResources(0, 3, srvs);
 			a_context->PSSetSamplers(0, 1, &sampler);
 
 			// A Minecraft point (blocks, in this world's place in Minecraft) relative to the camera,

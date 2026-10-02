@@ -317,6 +317,17 @@ namespace skycraft
 			}
 			const float f = std::clamp(pd.GetHitFraction(), 0.0f, 1.0f);
 			a_hit = a_from + (a_to - a_from) * f;  // set even when it isn't ground (callers may look past it)
+			// FalloutCraft: ground Minecraft dug out isn't ground any more (Fallout still has it).
+			if (!mcBlock) {
+				const RE::NiPoint3 dir = a_to - a_from;
+				const float        len = dir.Length();
+				const RE::NiPoint3 inside = len > 1.0f ? a_hit + dir * (3.5f / len) : a_hit;  // just past the surface
+				const auto         p = GameToMc(inside);
+				const std::uint32_t world = (a_cell->IsInterior() || !a_cell->worldSpace) ? a_cell->GetFormID() : a_cell->worldSpace->GetFormID();
+				if (Dig::IsDug(world, int(std::floor(p.x)), int(std::floor(p.y)), int(std::floor(p.z)))) {
+					mcBlock = true;
+				}
+			}
 			if (a_layer < 0) {
 				a_layer = 0x7F;  // a hit without a body: not ground, but something to look past
 			}

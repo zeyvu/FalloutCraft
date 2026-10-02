@@ -57,7 +57,8 @@ namespace skycraft
 
 		struct Tri
 		{
-			float v[9];  // three vertices, MC space
+			float         v[9];  // three vertices, MC space
+			std::uint32_t flags{ 0 };  // proto::ColTriFlags (diggable, terrain, material)
 		};
 
 		struct Job
@@ -67,6 +68,7 @@ namespace skycraft
 			bool             clear{ false };
 			std::vector<Tri> tris;
 			std::vector<Tri> helperTris;  // stair helpers: sent as triangles only, never voxelized
+			std::vector<Tri> ghostTris;   // diggable surfaces as they were before cells were dug out (not collision)
 		};
 
 		// A shape's surface, triangulated once, in the shape's own space (Havok units).
@@ -84,6 +86,9 @@ namespace skycraft
 			alignas(16) float    xf[16];  // hkTransform: rotation columns [0..2] [4..6] [8..10], translation [12..14]
 			float                lo[3], hi[3];  // world AABB, MC space
 			bool                 helper;        // stair helper (triangles only)
+			std::uint32_t        triFlags{ 0 };  // FalloutCraft: diggable ground / trees / rock (proto::ColTriFlags)
+			std::uint32_t        id{ 0 };        // Havok body id
+			std::uint64_t        userData{ 0 };  // Bethesda's: the bhkNPCollisionObject that owns it
 		};
 
 		void        GatherBodies(RE::bhkWorld* a_bhk, RE::hknpBSWorld* a_world, const McVec& a_player);
@@ -141,6 +146,13 @@ namespace skycraft
 		bool  offsetGuessed_{ false };
 		float GroundErrorFor(const float* a_offset);
 		std::vector<const RE::hknpBody*> rawForOrigin_;
+		// FalloutCraft: the Fallout world being exported (SkyState::worldId) and whether it's an
+		// exterior (its ground sheets are diggable land), for cutting out dug cells (fo_dig.cpp).
+		std::uint32_t worldId_{ 0 };
+		bool          exterior_{ false };
+		void          CutDugCells(Job& a_job);
+		// Trees and loose rocks a cell was dug out of are taken out of Fallout's world (Disable).
+		void          RemoveDugObjects(RE::bhkWorld* a_bhk, RE::hknpBSWorld* a_world);
 
 		// Diagnostics.
 		std::unordered_set<int> loggedTypes_;

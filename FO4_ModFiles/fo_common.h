@@ -5,6 +5,8 @@
 #include "skycraft_link.h"
 
 #include <atomic>
+#include <mutex>
+#include <vector>
 #include <cmath>
 
 namespace skycraft
@@ -100,6 +102,34 @@ namespace skycraft
 	// Fallout's own collision along a segment (game units): the first static surface it meets.
 	// Main thread.
 	bool PickGroundAt(RE::TESObjectCELL* a_cell, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to, RE::NiPoint3& a_hit);
+
+	// Cells Minecraft dug out of Fallout's world (fo_dig.cpp), cut out of the collision we export.
+	namespace Dig
+	{
+		void                         OnDug(const std::uint8_t* a_data, std::uint32_t a_bytes);  // render thread
+		bool                         TakeChanged();
+		std::unique_lock<std::mutex> Lock();
+		bool                         AnyLocked(std::uint32_t a_world);
+		bool                         IsDugLocked(std::uint32_t a_world, std::int32_t a_x, std::int32_t a_y, std::int32_t a_z);
+		bool                         IsDug(std::uint32_t a_world, std::int32_t a_x, std::int32_t a_y, std::int32_t a_z);
+		struct Cell
+		{
+			std::uint32_t world;
+			std::int32_t  x, y, z;
+		};
+		void TakeFresh(std::vector<Cell>& a_out);  // cells newly dug since last time
+		std::uint64_t Version();  // changes whenever the dug cells (or the current world) change
+		void          SetCurrentWorld(std::uint32_t a_world);
+		std::uint32_t CurrentWorld();
+		// 1 per dug cell of a_world in the box (x fastest, then y, then z); false if none at all.
+		bool FillVolume(std::uint32_t a_world, std::int32_t a_x0, std::int32_t a_y0, std::int32_t a_z0, int a_w, int a_h, int a_d, std::uint8_t* a_out);
+	}
+
+	// Fallout containers and corpses also hold Minecraft things (fo_scavenge.cpp).
+	namespace Scavenge
+	{
+		void Install();
+	}
 
 	// Minecraft blocks as Fallout collision, so NPCs (and Fallout's physics) bump into builds.
 	namespace BlockCollision

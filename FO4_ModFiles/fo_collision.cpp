@@ -84,6 +84,11 @@ namespace skycraft
 			}
 		}
 
+		// FalloutCraft: what Minecraft can dig out of a body, as ColTri flags: the land (grass, with dirt
+		// and stone under it), trees (logs) and big rocks and cliffs (stone). Buildings, roads and
+		// everything else stay.
+		std::uint32_t DigFlags(int a_layer, const RE::hknpShape* a_shape);
+
 		// ---- triangle / box overlap (Akenine-Moller SAT), voxel units -------------------------
 		inline void  Sub(const float* a, const float* b, float* o) { o[0] = a[0] - b[0], o[1] = a[1] - b[1], o[2] = a[2] - b[2]; }
 		inline void  Cross(const float* a, const float* b, float* o)
@@ -267,6 +272,38 @@ namespace skycraft
 			a_array.m_capacityAndFlags = RE::hkArrayBase<T>::kDontDeallocateFlag;
 		}
 
+		// Winding so the normal ((b-a) x (c-a)) points up.
+		template <class T>
+		void FaceUp(T& a_tri)
+		{
+			const float* v = a_tri.v;
+			const float  ny = (v[5] - v[2]) * (v[6] - v[0]) - (v[3] - v[0]) * (v[8] - v[2]);
+			if (ny < 0.0f) {
+				for (int k = 0; k < 3; ++k) {
+					std::swap(a_tri.v[3 + k], a_tri.v[6 + k]);
+				}
+			}
+		}
+
+		std::uint32_t DigFlags(int a_layer, const RE::hknpShape* a_shape)
+		{
+			using L = RE::COL_LAYER;
+			constexpr int kHeightField = 10;  // CompressedHeightField (ShapeTypeName)
+			auto          dig = [](std::uint32_t a_material, bool a_terrain) {
+                return proto::kTriDiggable | (a_terrain ? proto::kTriTerrain : 0u) | (a_material << proto::kTriMaterialShift);
+			};
+			if (a_layer == static_cast<int>(L::kTerrain) || GuardedType(a_shape) == kHeightField) {
+				return dig(proto::kDigGrass, true);
+			}
+			if (a_layer == static_cast<int>(L::kTrees)) {
+				return dig(proto::kDigOakLog, false);
+			}
+			if (a_layer == static_cast<int>(L::kGround)) {
+				return dig(proto::kDigStone, false);
+			}
+			return 0;
+		}
+
 		const char* ShapeTypeName(int a_type)
 		{
 			static constexpr const char* kNames[] = { "Convex", "ConvexPolytope", "Sphere", "Capsule", "Triangle", "CompressedMesh",
@@ -353,6 +390,14 @@ namespace skycraft
 		if (!world) {
 			return;
 		}
+
+		exterior_ = !a_cell->IsInterior() && a_cell->worldSpace;
+		worldId_ = exterior_ ? a_cell->worldSpace->GetFormID() : a_cell->GetFormID();  // as SkyState::worldId
+		Dig::SetCurrentWorld(worldId_);
+		if (Dig::TakeChanged()) {
+			Refresh();  // cells were dug (or filled): send the regions around the player again
+		}
+		RemoveDugObjects(bhk, world);
 
 		const int  prx = static_cast<int>(std::floor(a_playerMc.x / kRegionSize));
 		const int  pry = static_cast<int>(std::floor(a_playerMc.y / kRegionSize));
@@ -451,6 +496,7 @@ namespace skycraft
 		{
 			const RE::hknpBody* body;
 			bool                helper;
+			int                 layer;
 		};
 		std::vector<Raw> raw;
 		raw.reserve(1024);
@@ -483,7 +529,7 @@ namespace skycraft
 			if (!Included(layer, isStatic)) {
 				continue;
 			}
-			raw.push_back({ &body, layer == static_cast<int>(RE::COL_LAYER::kStairHelper) });
+			raw.push_back({ &body, layer == static_cast<int>(RE::COL_LAYER::kStairHelper), layer });
 		}
 
 		rawForOrigin_.clear();
@@ -577,6 +623,9 @@ namespace skycraft
 			b.shape = r.body->m_shape;
 			std::memcpy(b.xf, &r.body->m_transform, sizeof(b.xf));
 			b.helper = r.helper;
+			b.triFlags = DigFlags(r.layer, r.body->m_shape);
+			std::memcpy(&b.id, &r.body->m_id, sizeof(b.id));
+			b.userData = r.body->m_userData;
 			const float mn[3] = { box.min.x, box.min.y, box.min.z }, mx[3] = { box.max.x, box.max.y, box.max.z };
 			float       p[3], q[3];
 			HkPointToMc(mn, p);
@@ -938,13 +987,24 @@ namespace skycraft
 					XfPoint(body.xf, src[v], w);
 					HkPointToMc(w, tri.v + v * 3);
 				}
+				tri.flags = body.triFlags;
+				if ((tri.flags & proto::kTriTerrain) != 0) {
+					FaceUp(tri);  // the land's outside is up (Minecraft's digging reads the winding)
+				}
 				out.push_back(tri);
 			}
 		}
 
 		if (a_sheet && !a_sheet->empty()) {
-			job.tris.insert(job.tris.end(), a_sheet->begin(), a_sheet->end());
+			// Outdoors the sheet is the land (or a road on it): diggable like the land.
+			const std::uint32_t sheetFlags = exterior_ ? (proto::kTriDiggable | proto::kTriTerrain | (proto::kDigGrass << proto::kTriMaterialShift)) : 0u;
+			for (auto t : *a_sheet) {
+				t.flags = sheetFlags;
+				FaceUp(t);
+				job.tris.push_back(t);
+			}
 		}
+		CutDugCells(job);
 		// A region that had ground and now comes back with (almost) none is far more likely Fallout
 		// re-streaming its bodies this frame than the ground really vanishing; sending it would open
 		// a hole under the player. Keep Minecraft's copy until the result has held for a while.
@@ -1057,7 +1117,7 @@ namespace skycraft
 		const float lo[3] = { float(a_job.rx * kRegionSize) - 0.5f, float(a_job.ry * kRegionSize) - 0.5f, float(a_job.rz * kRegionSize) - 0.5f };
 		const float hi[3] = { lo[0] + kRegionSize + 1.0f, lo[1] + kRegionSize + 1.0f, lo[2] + kRegionSize + 1.0f };
 		std::vector<proto::ColTri> out;
-		out.reserve(a_job.tris.size() + a_job.helperTris.size());
+		out.reserve(a_job.tris.size() + a_job.helperTris.size() + a_job.ghostTris.size());
 		auto add = [&](const Tri& a_tri, std::uint32_t a_flags) {
 			float tlo[3], thi[3];
 			for (int k = 0; k < 3; ++k) {
@@ -1072,10 +1132,13 @@ namespace skycraft
 			}
 		};
 		for (const auto& t : a_job.tris) {
-			add(t, 0);
+			add(t, t.flags);
 		}
 		for (const auto& t : a_job.helperTris) {
 			add(t, proto::kTriStairHelper);
+		}
+		for (const auto& t : a_job.ghostTris) {
+			add(t, t.flags | proto::kTriGhost);
 		}
 		proto::ColRegion header{};
 		header.minX = a_job.rx * kRegionSize;
@@ -1236,5 +1299,180 @@ namespace skycraft
 		}
 		Send(payload, proto::kColRegion);
 		statSentBlocks_ += blocks.size();
+	}
+
+	// FalloutCraft: diggable triangles that run through cells Minecraft dug out lose those parts
+	// (Minecraft's player falls into the hole), and go along whole as ghosts (Minecraft works out
+	// what's inside Fallout's ground from them). Each such triangle is split along the block grid.
+	void Collision::CutDugCells(Job& a_job)
+	{
+		auto guard = Dig::Lock();
+		if (!Dig::AnyLocked(worldId_)) {
+			return;
+		}
+		const std::uint32_t world = worldId_;
+		auto anyDug = [&](const float* lo, const float* hi) {
+			for (int x = int(std::floor(lo[0])); x <= int(std::floor(hi[0])); ++x) {
+				for (int y = int(std::floor(lo[1])); y <= int(std::floor(hi[1])); ++y) {
+					for (int z = int(std::floor(lo[2])); z <= int(std::floor(hi[2])); ++z) {
+						if (Dig::IsDugLocked(world, x, y, z)) {
+							return true;
+						}
+					}
+				}
+			}
+			return false;
+		};
+
+		using Poly = std::vector<std::array<float, 3>>;
+		// Split a convex polygon by the plane p[axis] = a_at into the two sides.
+		auto split = [](const Poly& a_in, int a_axis, float a_at, Poly& a_lo, Poly& a_hi) {
+			a_lo.clear();
+			a_hi.clear();
+			const std::size_t n = a_in.size();
+			for (std::size_t i = 0; i < n; ++i) {
+				const auto& p = a_in[i];
+				const auto& q = a_in[(i + 1) % n];
+				const bool  pLo = p[a_axis] <= a_at, qLo = q[a_axis] <= a_at;
+				(pLo ? a_lo : a_hi).push_back(p);
+				if (pLo != qLo) {
+					const float t = (a_at - p[a_axis]) / (q[a_axis] - p[a_axis]);
+					std::array<float, 3> m{ p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t };
+					m[a_axis] = a_at;
+					a_lo.push_back(m);
+					a_hi.push_back(m);
+				}
+			}
+		};
+
+		std::vector<Tri> kept;
+		kept.reserve(a_job.tris.size());
+		std::size_t cut = 0;
+		for (const auto& tri : a_job.tris) {
+			if ((tri.flags & proto::kTriDiggable) == 0) {
+				kept.push_back(tri);
+				continue;
+			}
+			float lo[3], hi[3];
+			for (int k = 0; k < 3; ++k) {
+				lo[k] = std::min({ tri.v[k], tri.v[3 + k], tri.v[6 + k] });
+				hi[k] = std::max({ tri.v[k], tri.v[3 + k], tri.v[6 + k] });
+			}
+			if (!anyDug(lo, hi) || (hi[0] - lo[0]) > 64.0f || (hi[1] - lo[1]) > 64.0f || (hi[2] - lo[2]) > 64.0f) {
+				kept.push_back(tri);
+				continue;
+			}
+			++cut;
+			a_job.ghostTris.push_back(tri);
+			// Split along every block boundary it crosses, axis by axis.
+			std::vector<Poly> pieces{ Poly{ { tri.v[0], tri.v[1], tri.v[2] }, { tri.v[3], tri.v[4], tri.v[5] }, { tri.v[6], tri.v[7], tri.v[8] } } };
+			for (int axis = 0; axis < 3; ++axis) {
+				std::vector<Poly> next;
+				for (auto& poly : pieces) {
+					Poly rest = std::move(poly);
+					for (int k = int(std::floor(lo[axis])) + 1; k <= int(std::ceil(hi[axis])) - 1; ++k) {
+						Poly below, above;
+						split(rest, axis, float(k), below, above);
+						if (below.size() >= 3) {
+							next.push_back(std::move(below));
+						}
+						rest = std::move(above);
+						if (rest.size() < 3) {
+							break;
+						}
+					}
+					if (rest.size() >= 3) {
+						next.push_back(std::move(rest));
+					}
+				}
+				pieces = std::move(next);
+			}
+			for (const auto& poly : pieces) {
+				float c[3] = { 0, 0, 0 };
+				for (const auto& p : poly) {
+					c[0] += p[0], c[1] += p[1], c[2] += p[2];
+				}
+				const float inv = 1.0f / float(poly.size());
+				if (Dig::IsDugLocked(world, int(std::floor(c[0] * inv)), int(std::floor(c[1] * inv)), int(std::floor(c[2] * inv)))) {
+					continue;  // this part was dug out
+				}
+				for (std::size_t i = 1; i + 1 < poly.size(); ++i) {
+					Tri t{};
+					t.flags = tri.flags;
+					std::memcpy(t.v, poly[0].data(), sizeof(float) * 3);
+					std::memcpy(t.v + 3, poly[i].data(), sizeof(float) * 3);
+					std::memcpy(t.v + 6, poly[i + 1].data(), sizeof(float) * 3);
+					kept.push_back(t);
+				}
+			}
+		}
+		if (cut > 0) {
+			a_job.tris = std::move(kept);
+		}
+	}
+
+	// FalloutCraft: chopping a tree or breaking a boulder takes the whole object out of Fallout's
+	// world (it's disabled: no more model or collision), so it doesn't stand there after Minecraft dug
+	// into it. Big rocks and cliffs (more than ~10 blocks across) and the land itself stay: those are
+	// only cut where they were dug.
+	void Collision::RemoveDugObjects([[maybe_unused]] RE::bhkWorld* a_bhk, [[maybe_unused]] RE::hknpBSWorld* a_world)
+	{
+		std::vector<Dig::Cell> cells;
+		Dig::TakeFresh(cells);
+		if (cells.empty()) {
+			return;
+		}
+		constexpr std::uint32_t kLog = proto::kDigOakLog << proto::kTriMaterialShift;
+		constexpr std::uint32_t kStone = proto::kDigStone << proto::kTriMaterialShift;
+		std::vector<std::uint64_t> owners;
+		for (const auto& c : cells) {
+			if (c.world != worldId_) {
+				continue;
+			}
+			const float p[3] = { c.x + 0.5f, c.y + 0.5f, c.z + 0.5f };
+			for (const auto& b : bodies_) {
+				if ((b.triFlags & proto::kTriDiggable) == 0 || (b.triFlags & proto::kTriTerrain) != 0) {
+					continue;
+				}
+				const std::uint32_t material = b.triFlags & (0xFFu << proto::kTriMaterialShift);
+				const float         wide = std::max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2]);
+				if (material != kLog && !(material == kStone && wide <= 10.0f)) {
+					continue;
+				}
+				if (p[0] >= b.lo[0] - 0.6f && p[0] <= b.hi[0] + 0.6f && p[1] >= b.lo[1] - 0.6f && p[1] <= b.hi[1] + 0.6f && p[2] >= b.lo[2] - 0.6f &&
+					p[2] <= b.hi[2] + 0.6f && b.userData && std::find(owners.begin(), owners.end(), b.userData) == owners.end()) {
+					owners.push_back(b.userData);
+				}
+			}
+		}
+		if (owners.empty()) {
+			return;
+		}
+		// The body's user data is its bhkNPCollisionObject (checked by its vtable before use; no game
+		// lookups that take Havok's lock), whose scene node leads to the reference.
+		static const std::uintptr_t collisionVtbl = REL::Relocation<std::uintptr_t>{ RE::VTABLE::bhkNPCollisionObject[0] }.address();
+		std::vector<RE::TESObjectREFR*> refs;
+		for (auto owner : owners) {
+			std::uintptr_t vtbl = 0, node = 0;
+			if (!ReadPointer(reinterpret_cast<const void*>(owner), &vtbl) || vtbl != collisionVtbl) {
+				static int logged = 0;
+				if (logged++ < 3) {
+					REX::WARN("dig: a dug body's owner {:X} isn't a collision object (vtable {:X}); leaving it", owner, vtbl);
+				}
+				continue;
+			}
+			if (!ReadPointer(reinterpret_cast<const void*>(owner + 0x10 /* NiCollisionObject::sceneObject */), &node) || !node) {
+				continue;
+			}
+			auto* ref = RE::TESObjectREFR::FindReferenceFor3D(reinterpret_cast<const RE::NiAVObject*>(node));
+			if (ref && !ref->As<RE::Actor>() && !ref->IsDisabled() && std::find(refs.begin(), refs.end(), ref) == refs.end()) {
+				refs.push_back(ref);
+			}
+		}
+		for (auto* ref : refs) {
+			REX::INFO("dig: {:08X} was dug into; taking it out of Fallout's world", ref->GetFormID());
+			ref->Disable();
+		}
+		Refresh();
 	}
 }

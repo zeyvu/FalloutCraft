@@ -161,23 +161,70 @@ namespace skycraft::BlockCollision
 		using CreateFn = void* (*)(RE::hknpWorld*, RE::hknpBodyId*, const RE::hknpBodyCinfo*, std::int32_t, std::uint8_t);
 		using BoxFn = RE::hknpConvexShape* (*)(const RE::hkVector4f*, float, const RE::hknpConvexShape::BuildConfig*);
 
-		bool GuardedCreate(CreateFn a_fn, RE::hknpWorld* a_world, RE::hknpBodyId* a_id, const RE::hknpBodyCinfo* a_info)
+		// a_code: the exception code if Havok threw (0 if not).
+		bool GuardedCreate(CreateFn a_fn, RE::hknpWorld* a_world, RE::hknpBodyId* a_id, const RE::hknpBodyCinfo* a_info, std::int32_t a_mode, unsigned long* a_code)
 		{
 			__try {
-				a_fn(a_world, a_id, a_info, 1 /* kAddBodyNow */, 0 /* no flags */);
+				a_fn(a_world, a_id, a_info, a_mode, 0 /* no flags */);
 				return true;
-			} __except (kExecuteHandler) {
+			} __except (*a_code = GetExceptionCode(), kExecuteHandler) {
 				return false;
 			}
 		}
 
-		RE::hknpConvexShape* GuardedBox(BoxFn a_fn, const RE::hkVector4f* a_half, const RE::hknpConvexShape::BuildConfig* a_config)
+		RE::hknpConvexShape* GuardedBox(BoxFn a_fn, const RE::hkVector4f* a_half, const RE::hknpConvexShape::BuildConfig* a_config, unsigned long* a_code)
 		{
 			__try {
 				return a_fn(a_half, 0.0f, a_config);
-			} __except (kExecuteHandler) {
+			} __except (*a_code = GetExceptionCode(), kExecuteHandler) {
 				return nullptr;
 			}
+		}
+
+		int failLogs = 0;
+
+		// What a real Fallout static body uses (motion, quality, material, collision filter): ours copy
+		// it. The defaults hknpBodyCinfo's constructor leaves (0x7FFFFFFF motion) crash createBody.
+		struct Template
+		{
+			bool          ok{ false };
+			std::uint32_t motion{ 0 };
+			std::uint16_t material{ 0 };
+			std::uint8_t  quality{ 0 };
+			std::uint32_t filter{ 0 };
+			std::uint32_t flags{ 0 };
+		};
+		Template       statics;
+		RE::hknpWorld* templateWorld = nullptr;
+
+		void FindTemplate(RE::hknpWorld* a_world)
+		{
+			statics = {};
+			templateWorld = a_world;
+			auto&     bm = a_world->m_bodyManager;
+			const int count = std::min<int>(bm.m_bodies.size(), static_cast<int>(bm.m_peakBodyIndex) + 1);
+			for (int i = 0; i < count; ++i) {
+				const RE::hknpBody& body = bm.m_bodies.data()[i];
+				std::uint32_t       id = 0, flags = 0, motion = 0;
+				std::memcpy(&id, &body.m_id, sizeof(id));
+				std::memcpy(&flags, &body.m_flags, sizeof(flags));
+				std::memcpy(&motion, &body.m_motionId, sizeof(motion));
+				if (id != static_cast<std::uint32_t>(i) || !body.m_shape || (flags & 0x1) == 0 || (flags & 0x100) != 0 || motion == 0x7FFFFFFF) {
+					continue;  // not a live, colliding static body
+				}
+				if ((body.m_collisionFilterInfo & 0x7F) != static_cast<std::uint32_t>(RE::COL_LAYER::kStatic) || Owns(body.m_shape)) {
+					continue;
+				}
+				statics.ok = true;
+				statics.motion = motion;
+				std::memcpy(&statics.material, &body.m_materialId, sizeof(statics.material));
+				std::memcpy(&statics.quality, &body.m_qualityId, sizeof(statics.quality));
+				statics.filter = body.m_collisionFilterInfo;
+				statics.flags = flags & 0x00FFFF00u & ~0x100u;  // user/material flags, not the internal ones
+				REX::INFO("block collision: copying static body {} (motion {}, quality {}, material {}, filter {:08X})", i, statics.motion, statics.quality, statics.material, statics.filter);
+				return;
+			}
+			REX::WARN("block collision: no static body in this world to copy; not making any");
 		}
 
 		bool MakeBody(RE::hknpWorld* a_world, const float a_center[3], const float a_half[3], Section& a_section)
@@ -187,20 +234,39 @@ namespace skycraft::BlockCollision
 			// References are pointers in the x64 ABI, so these signatures match the game's functions.
 			static const auto boxFn = reinterpret_cast<BoxFn>(REL::Relocation<std::uintptr_t>{ RE::ID::hknpConvexShape::CreateFromHalfExtents }.address());
 			static const auto createFn = reinterpret_cast<CreateFn>(REL::Relocation<std::uintptr_t>{ RE::ID::hknpWorld::CreateBody }.address());
-			auto*                           shape = GuardedBox(boxFn, &half, &config);
+			unsigned long                   code = 0;
+			auto*                           shape = GuardedBox(boxFn, &half, &config, &code);
 			if (!shape) {
+				if (failLogs++ < 3) {
+					REX::WARN("block collision: making the box shape failed (exception {:08X}, half {:.2f} {:.2f} {:.2f})", code, a_half[0], a_half[1], a_half[2]);
+				}
 				return false;
 			}
 			RE::hknpBodyCinfo info;
 			info.m_shape = shape;
-			info.m_collisionFilterInfo = static_cast<std::uint32_t>(RE::COL_LAYER::kStatic);
+			info.m_collisionFilterInfo = statics.filter;
+			std::memcpy(&info.m_motionId, &statics.motion, sizeof(statics.motion));
+			std::memcpy(&info.m_materialId, &statics.material, sizeof(statics.material));
+			std::memcpy(&info.m_qualityId, &statics.quality, sizeof(statics.quality));
+			std::memcpy(&info.m_flags, &statics.flags, sizeof(statics.flags));
 			info.m_position = RE::hkVector4f{ a_center[0], a_center[1], a_center[2], 0.0f };
 
 			// hknpWorld::CreateBody(out id, cinfo, mode, flags) called directly: the RE wrapper
-			// returns a reference to its own local.
+			// returns a reference to its own local. Added now; if Havok refuses mid-step, next step.
 			RE::hknpBodyId id{};
 			id.m_value = 0x7FFFFFFF;
-			if (!GuardedCreate(createFn, a_world, &id, &info) || id.m_value == 0x7FFFFFFF) {
+			bool made = GuardedCreate(createFn, a_world, &id, &info, 1 /* kAddBodyNow */, &code);
+			const unsigned long firstCode = code;
+			if (!made || id.m_value == 0x7FFFFFFF) {
+				code = 0;
+				id.m_value = 0x7FFFFFFF;
+				made = GuardedCreate(createFn, a_world, &id, &info, 2 /* kAddBodyInNextStep */, &code);
+			}
+			if (!made || id.m_value == 0x7FFFFFFF) {
+				if (failLogs++ < 3) {
+					REX::WARN("block collision: Havok's createBody failed (add now: exception {:08X}; next step: exception {:08X}; id {:X}; shape type {})",
+						firstCode, code, id.m_value, static_cast<int>(shape->GetType()));
+				}
 				return false;
 			}
 			{
@@ -235,7 +301,8 @@ namespace skycraft::BlockCollision
 				};
 				const float half[3] = { float((mx1 - mx0) * 0.5 / k), float((mz1 - mz0) * 0.5 / k), float((my1 - my0) * 0.5 / k) };
 				++statBoxes;
-				if (!MakeBody(a_world, center, half, a_section)) {
+				if (!statics.ok || !MakeBody(a_world, center, half, a_section)) {
+					statics.ok = false;  // don't keep poking Havok after a failure (until the next world)
 					if (!loggedFail) {
 						loggedFail = true;
 						REX::WARN("block collision: Havok wouldn't make a body for a block box; NPCs won't collide with builds");
@@ -338,6 +405,9 @@ namespace skycraft::BlockCollision
 						s.sz = std::int32_t(std::int64_t(key & 0x1FFFFF) << 43 >> 43);
 						it = sections.emplace(key, s).first;
 					}
+					if (!it->second.bodies.empty() && it->second.bits == entry.second) {
+						continue;  // Minecraft re-sent the section (lighting, a neighbour) but its solid blocks didn't change
+					}
 					it->second.bits = entry.second;
 					it->second.dirty = true;
 				}
@@ -361,6 +431,9 @@ namespace skycraft::BlockCollision
 		}
 		std::sort(todo.begin(), todo.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
 		RE::BSAutoWriteLock lock(static_cast<RE::hknpBSWorld*>(world)->m_worldLock);
+		if (templateWorld != world) {
+			FindTemplate(world);
+		}
 		for (std::size_t i = 0; i < todo.size() && i < kSectionsPerFrame; ++i) {
 			Build(world, hkOffset, *todo[i].second);
 		}

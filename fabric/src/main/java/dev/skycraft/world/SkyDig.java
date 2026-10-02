@@ -189,6 +189,17 @@ public final class SkyDig {
 			if (harvest) {
 				state.getBlock().playerDestroy(level, player, pos, state, null, used);
 			}
+			// FalloutCraft: a tree sometimes leaves a sapling (and the odd apple), so you can plant more.
+			if (material == DIG_OAK_LOG || material == DIG_SPRUCE_LOG || material == DIG_BIRCH_LOG) {
+				float roll = level.getRandom().nextFloat();
+				if (roll < 0.30F) {
+					net.minecraft.world.item.Item sapling = material == DIG_SPRUCE_LOG ? net.minecraft.world.item.Items.SPRUCE_SAPLING
+						: material == DIG_BIRCH_LOG ? net.minecraft.world.item.Items.BIRCH_SAPLING : net.minecraft.world.item.Items.OAK_SAPLING;
+					Block.popResource(level, pos, new ItemStack(sapling));
+				} else if (roll < 0.36F && material == DIG_OAK_LOG) {
+					Block.popResource(level, pos, new ItemStack(net.minecraft.world.item.Items.APPLE));
+				}
+			}
 		}
 		level.levelEvent(LevelEvent.PARTICLES_AND_SOUND_DESTROY_BLOCK, pos, Block.getId(state));
 	}
@@ -319,7 +330,7 @@ public final class SkyDig {
 	/** Open air, or only partly inside Skyrim's geometry (its surface stays; walls are drawn). */
 	public static final int AIR = 0;
 	/** Blocks this far under the land's surface are bedrock. */
-	public static final double BEDROCK_DEPTH = 5.0;
+	public static final double BEDROCK_DEPTH = 16.0; // FalloutCraft: room for a dozen layers of stone (and ores) under the Wasteland
 	/** A cell becomes a block only when this many of its 27 sample points are inside. */
 	private static final int WHOLE = 25;
 
@@ -591,7 +602,7 @@ public final class SkyDig {
 	/** What's this deep behind a surface of this material: grass has dirt under it, then stone. */
 	public static int underground(int surface, double depth) {
 		return switch (surface) {
-			case DIG_GRASS, DIG_DIRT -> depth < 3.5 ? DIG_DIRT : DIG_STONE;
+			case DIG_GRASS, DIG_DIRT -> depth < 2.5 ? DIG_DIRT : DIG_STONE;
 			case DIG_MUD -> depth < 3.5 ? DIG_MUD : DIG_STONE;
 			case DIG_SNOW -> depth < 1.5 ? DIG_SNOW : depth < 3.5 ? DIG_DIRT : DIG_STONE;
 			case DIG_SAND -> depth < 3.5 ? DIG_SAND : DIG_STONE;

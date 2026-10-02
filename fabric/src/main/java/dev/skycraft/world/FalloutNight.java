@@ -11,7 +11,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.phys.AABB;
@@ -29,6 +28,7 @@ import net.minecraft.world.phys.AABB;
  */
 public final class FalloutNight {
 	public static final String TAG = "falloutcraft_night";
+	public static final String RANGED_TAG = "falloutcraft_ranged"; // skeletons: keep their distance
 
 	private static final int MAX_NEARBY = 10;        // night mobs alive around the player
 	private static final double SPAWN_MIN = 18.0;    // blocks from the player
@@ -122,7 +122,8 @@ public final class FalloutNight {
 			}
 			float roll = random.nextFloat();
 			String type = roll < 0.45F ? "zombie" : roll < 0.8F ? "skeleton" : "creeper";
-			run(server, String.format(Locale.ROOT, "summon minecraft:%s %.2f %.2f %.2f {Tags:[\"%s\"]}", type, x + 0.5, y, z + 0.5, TAG));
+			String tags = type.equals("skeleton") ? "\"" + TAG + "\",\"" + RANGED_TAG + "\"" : "\"" + TAG + "\"";
+			run(server, String.format(Locale.ROOT, "summon minecraft:%s %.2f %.2f %.2f {Tags:[%s]}", type, x + 0.5, y, z + 0.5, tags));
 			long now = System.currentTimeMillis();
 			if (now - lastLog > 10000) {
 				lastLog = now;
@@ -154,7 +155,7 @@ public final class FalloutNight {
 			return;
 		}
 		double d2 = mob.distanceToSqr(target);
-		double keep = mob.getType() == EntityType.SKELETON ? 8.0 * 8.0 : 1.2 * 1.2;
+		double keep = mob.entityTags().contains(RANGED_TAG) ? 8.0 * 8.0 : 1.2 * 1.2;
 		if (d2 <= keep || d2 > 48.0 * 48.0) {
 			return;
 		}

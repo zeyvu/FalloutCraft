@@ -191,6 +191,8 @@ namespace skycraft::proto
 		kInReleaseAll = 6,   // release every held key/button (input focus left MC)
 		kInHurt = 7,         // Skyrim hit the player: code = HurtKind, a = Skyrim damage * 100, b = attacker FormID, c = HurtFlags
 		kInOpenMenu = 8,     // open Minecraft's pause/options menu
+		kInScavenge = 9,     // FalloutCraft: the player opened a container (code 0) or a corpse (code 1) for the
+		                     // first time: a = its ref FormID, b = the corpse's level. Minecraft adds a little loot.
 	};
 
 	enum HurtKind : std::uint16_t

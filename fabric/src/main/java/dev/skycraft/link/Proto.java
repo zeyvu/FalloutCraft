@@ -40,6 +40,7 @@ public final class Proto {
 	// Input types added in v5
 	public static final int IN_HURT = 7;
 	public static final int IN_OPEN_MENU = 8;
+	public static final int IN_SCAVENGE = 9; // FalloutCraft: code 0 container / 1 corpse, a = ref FormID, b = corpse level
 	public static final int HURT_MELEE = 0;
 	public static final int HURT_PROJECTILE = 1;
 	public static final int HURT_MAGIC = 2;

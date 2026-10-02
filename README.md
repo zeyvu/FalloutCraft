@@ -8,6 +8,7 @@ movement, inventory, building, hearts and combat inside the Commonwealth.
 ![Minecraft](https://img.shields.io/badge/Minecraft-26.3-62b47a)
 ![Fabric](https://img.shields.io/badge/Fabric-0.19.5-dbd0b4)
 ![License](https://img.shields.io/badge/license-MIT-blue)
+[![Release](https://img.shields.io/github/v/release/zeyvu/FalloutCraft?include_prereleases&label=release)](https://github.com/zeyvu/FalloutCraft/releases/latest)
 
 ![FalloutCraft: a Minecraft player on Red Rocket's gas station](docs/screenshot.jpg)
 
@@ -21,6 +22,9 @@ Pip-Boy and listen to Diamond City Radio while you do it.
 Neither game is rewritten. Minecraft runs its own game logic, and Fallout 4 runs its world, NPCs,
 quests, Pip-Boy and saves. A Fallout 4 F4SE plugin and a Minecraft Fabric mod talk to each other
 through shared memory. Minecraft runs hidden in the background, and Fallout draws everything.
+
+**Latest: [v0.1.2 — Scavenging & Gathering](https://github.com/zeyvu/FalloutCraft/releases/tag/v0.1.2)**: Minecraft loot in Fallout's
+containers and corpses, chop trees and dig the ground for resources, and NPCs now bump into your builds.
 
 FalloutCraft is built on [SkyCraft](https://github.com/chasmlol/SkyCraft) by chasmlol, the
 Skyrim + Minecraft mod (see [Credits](#credits)).
@@ -60,6 +64,20 @@ Skyrim + Minecraft mod (see [Credits](#credits)).
   armour in Fallout. Fallout's own first-person arms are hidden.
 - **Interiors:** every interior and every other worldspace gets its own place in the Minecraft
   world, so what you build in one never shows up in another.
+  Interior walls, floors and doors line up with Fallout's own (fixed in v0.1.1).
+- **Minecraft nights:** Minecraft's clock follows Fallout's. From 20:00 to 5:00, zombies,
+  skeletons and creepers show up around you outdoors, alongside the Wasteland's own mutants.
+  Zombies and skeletons burn at dawn, and creepers blow holes in the ground.
+- **Scavenging:** the first time you open a container (a desk, a toolbox, a fridge...) or search
+  a corpse, you also find a little everyday Minecraft loot: sticks, coal, iron nuggets, paper,
+  string, torches, bread, bones, arrows, leather, saplings and seeds... ("Found! ..." in the chat).
+- **Gathering:** mine the world like in Minecraft. Chop a tree and it falls out of Fallout's world,
+  giving you logs and often a sapling; small rocks give stone; dig the Wasteland's ground for dirt,
+  then about a dozen layers of stone with ores (coal, iron, copper, redstone, gold, lapis, the
+  rare diamond) before bedrock. You can climb down into the holes you dig.
+- **NPCs vs your builds:** the blocks you place are solid for Fallout too, so NPCs and creatures
+  bump into your walls instead of walking through them. (They still plan their routes as if the
+  blocks weren't there.)
 
 ## Requirements
 
