@@ -197,9 +197,11 @@ Fallout's world, combat, night mobs, scavenging, gathering and digging, your blo
 Minecraft mobs, items and particles in Fallout, your skin in F5, and the inventory, hand and HUD
 over Fallout.
 
+![FalloutCraft: modding Minecraft client](docs/moddedFO4.png)
+
+
 **Other mods:** put them in the same `mods` folder as FalloutCraft. What they add to Minecraft's
-world (blocks, items, mobs, vehicles, guns, player models) is drawn in Fallout too. Tested with
-Superb Warfare, GeckoLib, Yes Steve Model, Fumo and a few smaller mods. Good to know:
+world (blocks, items, mobs, vehicles, guns, player models) is drawn in Fallout too. Good to know:
 
 - Mods that add lots of textures make Minecraft's texture atlas big (8192 pixels wide with Superb
   Warfare). It's sent to Fallout in pieces, so the first seconds after loading can take a moment.
