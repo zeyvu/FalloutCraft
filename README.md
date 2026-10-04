@@ -7,6 +7,7 @@ movement, inventory, building, hearts and combat inside the Commonwealth.
 ![F4SE](https://img.shields.io/badge/F4SE-0.7.9-555)
 ![Minecraft](https://img.shields.io/badge/Minecraft-26.3-62b47a)
 ![Fabric](https://img.shields.io/badge/Fabric-0.19.5-dbd0b4)
+![NeoForge 1.21.1](https://img.shields.io/badge/also-NeoForge%201.21.1-62b47a)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 [![Release](https://img.shields.io/github/v/release/zeyvu/FalloutCraft?include_prereleases&label=release)](https://github.com/zeyvu/FalloutCraft/releases/latest)
 
@@ -20,11 +21,13 @@ and a shield, while your Fallout S.P.E.C.I.A.L. makes Steve faster, stronger or 
 Pip-Boy and listen to Diamond City Radio while you do it.
 
 Neither game is rewritten. Minecraft runs its own game logic, and Fallout 4 runs its world, NPCs,
-quests, Pip-Boy and saves. A Fallout 4 F4SE plugin and a Minecraft Fabric mod talk to each other
+quests, Pip-Boy and saves. A Fallout 4 F4SE plugin and a Minecraft mod (Fabric on Minecraft 26.3, or NeoForge on
+1.21.1) talk to each other
 through shared memory. Minecraft runs hidden in the background, and Fallout draws everything.
 
-**Latest: [v0.1.2 — Scavenging & Gathering](https://github.com/zeyvu/FalloutCraft/releases/tag/v0.1.2)**: Minecraft loot in Fallout's
-containers and corpses, chop trees and dig the ground for resources, and NPCs now bump into your builds.
+**Latest: [v0.1.3 — Modded Minecraft Support](https://github.com/zeyvu/FalloutCraft/releases/tag/v0.1.3)**: FalloutCraft now
+runs on **NeoForge 1.21.1** too, so you can bring your Minecraft mods (weapons, vehicles, furniture, player
+models...) into the Commonwealth. Everything you know from the Fabric 26.3 build works there.
 
 FalloutCraft is built on [SkyCraft](https://github.com/chasmlol/SkyCraft) by chasmlol, the
 Skyrim + Minecraft mod (see [Credits](#credits)).
@@ -78,6 +81,10 @@ Skyrim + Minecraft mod (see [Credits](#credits)).
 - **NPCs vs your builds:** the blocks you place are solid for Fallout too, so NPCs and creatures
   bump into your walls instead of walking through them. (They still plan their routes as if the
   blocks weren't there.)
+- **Minecraft mods (NeoForge 1.21.1):** play with other Minecraft mods installed. Their blocks,
+  items, mobs, vehicles and player models are drawn in Fallout like Minecraft's own. Tested with
+  Superb Warfare (guns and vehicles), GeckoLib mods, Yes Steve Model and Fumo plushies (see
+  [Minecraft 1.21.1](#minecraft-1211)).
 
 ## Requirements
 
@@ -98,8 +105,9 @@ Skyrim + Minecraft mod (see [Credits](#credits)).
 |---|---|
 | Minecraft: Java Edition | A Microsoft account that owns it |
 | Minecraft 26.3 with [Fabric Loader](https://fabricmc.net/) 0.19.5 or newer | Started from this repo with `gradlew runClient` (see below) |
-| [Fabric API](https://modrinth.com/mod/fabric-api) for 26.3 | Pulled in by the build |
+| [Fabric API](https://modrinth.com/mod/fabric-api) for 26.3 (Fabric only) | Pulled in by the build |
 | Java 25 (JDK) | To build and run the Minecraft mod |
+| *Or* Minecraft **1.21.1** with [NeoForge](https://projects.neoforged.net/neoforged/neoforge) 21.1.x and Java 21 | To play with other Minecraft mods; see [Minecraft 1.21.1](#minecraft-1211) |
 
 Minecraft runs hidden next to Fallout. Budget about 3 GB of extra RAM and a GPU that runs
 Minecraft 26.3.
@@ -125,9 +133,14 @@ No Git or build tools needed. Grab the files from the
 1. Install **F4SE** and the **Address Library** (see [Fallout 4 mods](#1-fallout-4-mods) below).
 2. Install **`FalloutCraft-<version>-FO4.zip`** with Mod Organizer 2 / Vortex (*Install mod from
    archive*), or copy **`commonlibf4-template.dll`** into `Fallout 4\Data\F4SE\Plugins\`.
-3. In your Minecraft launcher (Prism Launcher, MultiMC, official) make a **Minecraft 26.3 + Fabric
-   Loader 0.19.5** instance running **Java 25**, and put **Fabric API 0.161.0+26.3** and
-   **`falloutcraft-<version>.jar`** in its `mods` folder.
+3. In your Minecraft launcher (Prism Launcher, MultiMC, Modrinth App, official) make a
+   **Minecraft 26.3 + Fabric Loader 0.19.5** instance running **Java 25**, and put **Fabric API
+   0.161.0+26.3** and **`falloutcraft-<version>.jar`** in its `mods` folder.
+
+   Or a **Minecraft 1.21.1 + NeoForge 21.1.x** instance (CurseForge, Prism...) running **Java 21**
+   with **`falloutcraft-neoforge-<version>+1.21.1.jar`** in its `mods` folder (see
+   [Minecraft 1.21.1](#minecraft-1211)). CurseForge's app lists only mods from its own catalog;
+   a jar you add yourself still loads.
 4. Start that Minecraft instance first (its window hides and it waits for Fallout), then start
    Fallout 4 through F4SE and load a save.
 
@@ -173,6 +186,28 @@ gradlew runClient
 That builds the FalloutCraft Minecraft mod and starts Minecraft with it. The first run downloads
 Minecraft 26.3, Fabric and the Fabric API (a few minutes). Minecraft hides its window and waits
 for Fallout. Leave it running.
+
+On Minecraft 1.21.1 with NeoForge instead: same command in `versions\1.21.1\neoforge`.
+
+#### Minecraft 1.21.1
+
+Most Minecraft mods and modpacks are on 1.21.1, so FalloutCraft has a **NeoForge 1.21.1** build
+too (since v0.1.3). It does everything the Fabric 26.3 build does: movement and collision in
+Fallout's world, combat, night mobs, scavenging, gathering and digging, your blocks and builds,
+Minecraft mobs, items and particles in Fallout, your skin in F5, and the inventory, hand and HUD
+over Fallout.
+
+**Other mods:** put them in the same `mods` folder as FalloutCraft. What they add to Minecraft's
+world (blocks, items, mobs, vehicles, guns, player models) is drawn in Fallout too. Tested with
+Superb Warfare, GeckoLib, Yes Steve Model, Fumo and a few smaller mods. Good to know:
+
+- Mods that add lots of textures make Minecraft's texture atlas big (8192 pixels wide with Superb
+  Warfare). It's sent to Fallout in pieces, so the first seconds after loading can take a moment.
+- Mods that draw with their own shaders or special effects (glow, outlines, custom GUIs inside the
+  world) may show up plainer in Fallout, or not at all.
+- Shader packs (Iris, Oculus) and mods that replace Minecraft's renderer (Sodium-style) aren't
+  supported: Fallout draws the world, not Minecraft.
+- Mods that take over the player's camera or movement will conflict.
 
 #### 5. Play
 
@@ -227,7 +262,8 @@ mouse buttons and so on.
 - If something goes wrong, the logs say what:
   - `Documents\My Games\Fallout4\F4SE\commonlibf4-template.log` (the Fallout plugin)
   - `Documents\My Games\Fallout4\F4SE\SkyCraft_crash.log` (crashes, with function names)
-  - `fabric\run\logs\latest.log` (Minecraft)
+  - `fabric\run\logs\latest.log` (Minecraft), or `logs\latest.log` in your launcher's instance
+    folder (CurseForge, Prism...)
 - Some cracked or uneven ground (Concord's broken roads, rubble) can still make the player stumble
   for a moment.
 - Fallout's inventory and perk screens open through the Pip-Boy; Fallout's weapons and VATS can't
@@ -241,6 +277,9 @@ mouse buttons and so on.
   Minecraft world. Deleting it moves interiors around, and what you built inside them won't show
   up in the same place.
 - Mods that also take over the player's camera or movement will conflict.
+- Minecraft blocks and models are lit with an approximation of Fallout's light (sun, sky, fog),
+  not by Fallout's own lighting yet: no shadows cast by them, and their shading won't always match
+  Fallout's surfaces exactly.
 
 ## Building from source
 
@@ -297,6 +336,19 @@ For development:
 
 - `fabric\gradlew runClient` starts a dev Minecraft that stays running when Fallout closes;
   `gradlew build` builds the mod's `.jar` into `fabric\build\libs\`.
+- NeoForge 1.21.1: `versions\1.21.1\neoforge` (`gradlew runClient`, `gradlew build` ->
+  `build\libs\falloutcraft-neoforge-<version>+1.21.1.jar`). It compiles the same shared code for
+  1.21.1 and adds NeoForge's entry point and glue (`src\main\java\dev\skycraft\neoforge`). Code
+  that talks to the mod loader goes through `dev.skycraft.platform.Platform` (Fabric's side in
+  `dev.skycraft.fabric`).
+- How one copy of the code serves every build: it's written for Fabric + Minecraft 26.3 (that build
+  compiles it as it is). Differences go between `//#if MC_1_21_1` / `//#if FABRIC` /
+  `//#if NEOFORGE` ... `//#else` ... `//#endif`, with the other targets' lines written as
+  `//$$ code`; the other builds make their own copy (`gradle/preprocess.gradle`), which also
+  renames `Identifier` to 1.21.1's `ResourceLocation`. Files that are mostly different on 1.21.1
+  live in `versions\1.21.1\common` (they replace the shared one), and
+  `versions\1.21.1\exclude.txt` lists what 1.21.1 leaves out for now. `python tools\preprocess.py
+  check` checks the rules; `python tools\preprocess.py gen <target> <folder>` writes a build's copy.
 - `docs\DESIGN.md` explains how the two halves fit together (written for SkyCraft), and
   `protocol\skycraft_protocol.h` is the shared-memory layout both sides follow
   (`FO4_ModFiles\skycraft_protocol.h` is the same file).
@@ -305,7 +357,9 @@ For development:
 |---|---|
 | `FO4_Release/` | The compiled plugin, laid out like the game's `Data` folder |
 | `FO4_ModFiles/` | The plugin's sources (C++, [CommonLibF4](https://github.com/libxse/commonlibf4)) and its `xmake.lua`, to drop into the CommonLibF4 template |
-| `fabric/` | The Minecraft Fabric mod (Java), from SkyCraft with FalloutCraft changes |
+| `fabric/` | The Minecraft mod (Java), from SkyCraft with FalloutCraft changes: its Fabric 26.3 build, and the code shared with NeoForge 1.21.1 |
+| `versions/1.21.1/` | The NeoForge 1.21.1 build (`neoforge/`) and the 1.21.1-only files (`common/`) |
+| `gradle/`, `tools/` | The shared-code preprocessor, release packaging |
 | `protocol/` | `skycraft_protocol.h`: the shared-memory layout both sides follow |
 | `docs/` | `DESIGN.md` explains how the two halves fit together (written for SkyCraft) |
 

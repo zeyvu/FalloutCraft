@@ -8,9 +8,15 @@ import dev.skycraft.link.SkyLink;
 import dev.skycraft.world.SkyClip;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
+//#if MC_1_21_1
+//$$ import net.minecraft.world.entity.projectile.AbstractArrow;
+//$$ import net.minecraft.world.entity.projectile.Arrow;
+//$$ import net.minecraft.world.entity.projectile.SpectralArrow;
+//#else
 import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.entity.projectile.arrow.Arrow;
 import net.minecraft.world.entity.projectile.arrow.SpectralArrow;
+//#endif
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Unique;
@@ -30,7 +36,11 @@ import org.spongepowered.asm.mixin.injection.At;
 public abstract class AbstractArrowMixin {
 	@WrapOperation(
 		method = "tick",
+//#if MC_1_21_1
+//$$ 		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;clip(Lnet/minecraft/world/level/ClipContext;)Lnet/minecraft/world/phys/BlockHitResult;")
+//#else
 		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;clipIncludingBorder(Lnet/minecraft/world/level/ClipContext;)Lnet/minecraft/world/phys/BlockHitResult;")
+//#endif
 	)
 	private BlockHitResult skycraft$hitSkyrim(Level level, ClipContext context, Operation<BlockHitResult> original) {
 		return SkyClip.refine(context.getFrom(), context.getTo(), original.call(level, context), SkyClip.Use.PROJECTILE);

@@ -83,9 +83,7 @@ public final class InputBridge {
 		}
 		if (server == null) {
 			// A guest in a friend's world: the host's server applies it.
-			if (net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.canSend(dev.skycraft.net.SkyNet.Hurt.TYPE)) {
-				net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(new dev.skycraft.net.SkyNet.Hurt(kind, skyrimDamage, attacker, flags));
-			}
+			dev.skycraft.client.platform.ClientPlatform.get().sendToServer(new dev.skycraft.net.SkyNet.Hurt(kind, skyrimDamage, attacker, flags));
 			return;
 		}
 		var uuid = minecraft.player.getUUID();

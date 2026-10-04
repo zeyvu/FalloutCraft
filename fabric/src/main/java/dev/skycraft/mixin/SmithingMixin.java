@@ -9,6 +9,14 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+//#if MC_1_21_1
+//$$ import net.minecraft.world.item.Equipable;
+//$$ import net.minecraft.world.item.Item;
+//$$ import net.minecraft.world.item.MaceItem;
+//$$ import net.minecraft.world.item.TieredItem;
+//$$ import net.minecraft.world.item.TridentItem;
+//$$ import net.minecraft.world.level.Level;
+//#endif
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -23,13 +31,25 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ItemStack.class)
 public abstract class SmithingMixin {
 	@Inject(method = "onCraftedBy", at = @At("HEAD"))
+//#if MC_1_21_1
+//$$ 	private void skycraft$trainSmithing(Level level, Player player, int craftCount, CallbackInfo ci) {
+//#else
 	private void skycraft$trainSmithing(Player player, int craftCount, CallbackInfo ci) {
+//#endif
 		ItemStack stack = (ItemStack) (Object) this;
 		if (!(player instanceof ServerPlayer serverPlayer) || !SkyNet.isHost(serverPlayer) || craftCount <= 0) {
 			return;
 		}
+//#if MC_1_21_1
+//$$ 		// 1.21.1 has no EQUIPPABLE or WEAPON components: armour, elytra and shields are Equipable items,
+//$$ 		// swords and tools TieredItems (they and tridents and maces also carry TOOL).
+//$$ 		Item item = stack.getItem();
+//$$ 		if (!(item instanceof Equipable) && !(item instanceof TieredItem) && !(item instanceof TridentItem) && !(item instanceof MaceItem)
+//$$ 			&& !stack.has(DataComponents.TOOL) && !stack.is(Items.BOW) && !stack.is(Items.CROSSBOW)) {
+//#else
 		if (!stack.has(DataComponents.EQUIPPABLE) && !stack.has(DataComponents.TOOL) && !stack.has(DataComponents.WEAPON) && !stack.is(Items.BOW)
 			&& !stack.is(Items.CROSSBOW)) {
+//#endif
 			return;
 		}
 		SkyLink.pushEvent(Proto.EV_SKILL_USE, Proto.SKILL_SMITHING, skycraft$worth(stack) * craftCount, 0.0F, 0.0F, 0.0F, 0);

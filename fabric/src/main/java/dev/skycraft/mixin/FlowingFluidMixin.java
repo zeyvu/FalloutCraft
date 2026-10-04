@@ -32,7 +32,11 @@ public abstract class FlowingFluidMixin {
 	private static final float MARGIN = 0.05F;
 
 	@Inject(method = "canPassThroughWall", at = @At("HEAD"), cancellable = true)
+//#if MC_1_21_1
+//$$ 	private void skycraft$skyrimWall( // an instance method in 1.21.1
+//#else
 	private static void skycraft$skyrimWall(
+//#endif
 		Direction direction, BlockGetter level, BlockPos sourcePos, BlockState sourceState, BlockPos targetPos, BlockState targetState,
 		CallbackInfoReturnable<Boolean> cir
 	) {

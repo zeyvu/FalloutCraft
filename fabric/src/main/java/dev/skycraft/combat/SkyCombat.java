@@ -8,10 +8,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
-import net.minecraft.core.Registry;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -25,6 +21,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -37,20 +34,33 @@ import org.jspecify.annotations.Nullable;
  * sounds and death all work the Minecraft way.
  */
 public final class SkyCombat {
-	public static final ResourceKey<EntityType<?>> SKYRIM_ACTOR_KEY =
-		ResourceKey.create(Registries.ENTITY_TYPE, Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "skyrim_actor"));
-	public static final EntityType<SkyrimActorEntity> SKYRIM_ACTOR = Registry.register(
-		BuiltInRegistries.ENTITY_TYPE,
-		SKYRIM_ACTOR_KEY,
-		EntityType.Builder.<SkyrimActorEntity>of(SkyrimActorEntity::new, MobCategory.MISC)
+	public static final Identifier SKYRIM_ACTOR_ID = Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "skyrim_actor");
+	public static final ResourceKey<EntityType<?>> SKYRIM_ACTOR_KEY = ResourceKey.create(Registries.ENTITY_TYPE, SKYRIM_ACTOR_ID);
+	/** The stand-in's entity type: set when the mod loader registers it ({@link #createActorType()}). */
+	public static EntityType<SkyrimActorEntity> SKYRIM_ACTOR;
+
+	/** A new stand-in entity type, for the mod loader to register under {@link #SKYRIM_ACTOR_KEY}. */
+	public static EntityType<SkyrimActorEntity> createActorType() {
+		return EntityType.Builder.<SkyrimActorEntity>of(SkyrimActorEntity::new, MobCategory.MISC)
 			.sized(0.6F, 1.8F)
 			.noSave()
 			.noSummon()
+			//#if MC_1_21_1
+			//$$ .clientTrackingRange(10)
+			//$$ .updateInterval(1)
+			//$$ .build(SKYRIM_ACTOR_ID.toString()); // 1.21.1: no noLootTable() (a missing loot table just drops nothing)
+			//#else
 			.noLootTable()
 			.clientTrackingRange(10)
 			.updateInterval(1)
-			.build(SKYRIM_ACTOR_KEY)
-	);
+			.build(SKYRIM_ACTOR_KEY);
+			//#endif
+	}
+
+	/** The stand-in's attributes (a plain living entity's), registered by the mod loader. */
+	public static AttributeSupplier.Builder actorAttributes() {
+		return LivingEntity.createLivingAttributes();
+	}
 
 	/** Skyrim damage is divided by this for Minecraft (a 15-damage bandit swing = 3 = 1.5 hearts). */
 	public static final float SKYRIM_TO_MC_DAMAGE = 5.0F;
@@ -61,22 +71,22 @@ public final class SkyCombat {
 	private SkyCombat() {
 	}
 
-	public static void init() {
-		FabricDefaultAttributeRegistry.register(SKYRIM_ACTOR, LivingEntity.createLivingAttributes());
-		ServerTickEvents.END_SERVER_TICK.register(SkyCombat::serverTick);
-	}
-
 	public static @Nullable SkyrimActorEntity proxy(int formId) {
 		return PROXIES.get(formId);
 	}
 
-	private static void serverTick(MinecraftServer server) {
+	/** End of every server tick (registered by the mod loader). */
+	public static void serverTick(MinecraftServer server) {
 		List<ServerPlayer> players = server.getPlayerList().getPlayers();
 		if (!SkyLink.active() || players.isEmpty()) {
 			removeAll();
 			return;
 		}
+		//#if MC_1_21_1
+		//$$ ServerLevel level = players.getFirst().serverLevel();
+		//#else
 		ServerLevel level = players.getFirst().level();
+		//#endif
 		for (ServerPlayer player : players) {
 			pickUpNearby(player);
 			if (server.getTickCount() % 20 == 0) {
@@ -120,7 +130,11 @@ public final class SkyCombat {
 				proxy = new SkyrimActorEntity(SKYRIM_ACTOR, level);
 				proxy.setFormId(a.formId());
 				proxy.setSize(a.width(), a.height());
+				//#if MC_1_21_1
+				//$$ proxy.moveTo(a.x(), a.y(), a.z(), a.yaw(), 0.0F);
+				//#else
 				proxy.snapTo(a.x(), a.y(), a.z(), a.yaw(), 0.0F);
+				//#endif
 				if (!a.name().isEmpty()) {
 					proxy.setCustomName(Component.literal(a.name()));
 				}
@@ -153,7 +167,11 @@ public final class SkyCombat {
 			var state = level.getBlockState(pos);
 			if (state.getBlock() instanceof net.minecraft.world.level.block.BasePressurePlateBlock
 				|| state.getBlock() instanceof net.minecraft.world.level.block.TripWireBlock) {
+				//#if MC_1_21_1
+				//$$ state.entityInside(level, pos, proxy);
+				//#else
 				state.entityInside(level, pos, proxy, net.minecraft.world.entity.InsideBlockEffectApplier.NOOP, true);
+				//#endif
 			}
 		}
 	}
@@ -170,7 +188,11 @@ public final class SkyCombat {
 		}
 		for (Entity entity : player.level().getEntities(player, player.getBoundingBox().inflate(1.25, 1.0, 1.25))) {
 			if (!entity.isRemoved() && (entity instanceof net.minecraft.world.entity.item.ItemEntity
+				//#if MC_1_21_1
+				//$$ || entity instanceof net.minecraft.world.entity.projectile.AbstractArrow)) {
+				//#else
 				|| entity instanceof net.minecraft.world.entity.projectile.arrow.AbstractArrow)) {
+				//#endif
 				entity.playerTouch(player);
 			}
 		}
@@ -192,7 +214,11 @@ public final class SkyCombat {
 		if (!player.isAlive() || skyrimDamage <= 0.0F) {
 			return;
 		}
+		//#if MC_1_21_1
+		//$$ ServerLevel level = player.serverLevel();
+		//#else
 		ServerLevel level = player.level();
+		//#endif
 		SkyrimActorEntity attacker = PROXIES.get(attackerFormId);
 		// FalloutCraft: Fallout's gunmen shoot from far off; up to the actor table's range (80 blocks)
 		// the attacker stays known, so armour and shields work against their bullets too.
@@ -209,13 +235,21 @@ public final class SkyCombat {
 		float damage = skyrimDamage / SKYRIM_TO_MC_DAMAGE;
 		float healthBefore = player.getHealth();
 		boolean blocking = player.isBlocking();
+		//#if MC_1_21_1
+		//$$ boolean hurt = player.hurt(source, damage);
+		//#else
 		boolean hurt = player.hurtServer(level, source, damage);
+		//#endif
 		trainDefence(player, damage, blocking && player.getHealth() >= healthBefore - 1.0E-3F);
 		SkyCraft.LOG.info("SkyCraft: Skyrim hit the player for {} ({} Minecraft): health {} -> {}{}", skyrimDamage, damage, healthBefore, player.getHealth(),
 			hurt ? "" : " (blocked/immune)");
 		if (hurt && attacker != null && (flags & Proto.HURT_POWER_ATTACK) != 0 && !player.isBlocking()) {
 			// Power attacks shove harder, like a sprint hit does in Minecraft.
+			//#if MC_1_21_1
+			//$$ player.knockback(0.5, attacker.getX() - player.getX(), attacker.getZ() - player.getZ());
+			//#else
 			player.knockback(0.5, attacker.getX() - player.getX(), attacker.getZ() - player.getZ(), source, damage);
+			//#endif
 		}
 	}
 

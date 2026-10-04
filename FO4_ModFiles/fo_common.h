@@ -7,7 +7,11 @@
 #include <atomic>
 #include <mutex>
 #include <vector>
+#include <string>
 #include <cmath>
+
+struct ID3D11DeviceContext;
+struct ID3D11Texture2D;
 
 namespace skycraft
 {
@@ -129,6 +133,43 @@ namespace skycraft
 	namespace Scavenge
 	{
 		void Install();
+	}
+
+	// Fallout's own collision between two points (game units): true if something solid (the land,
+	// a building, a tree, a rock, a Minecraft block's body) is in the way. Not actors or triggers.
+	bool RayBlocked(RE::TESObjectCELL* a_cell, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to);
+
+	// Fallout's light (sun, ambient, fog) and shadows for Minecraft's blocks (fo_shadow.cpp).
+	namespace Shadows
+	{
+		struct Light
+		{
+			float toSun[3]{ 0, 0, 1 };      // Fallout axes
+			float sunColor[3]{};            // 0 at night / indoors
+			float ambient[6][3]{};          // directional ambient: +X -X +Y -Y +Z -Z (Fallout axes)
+			float fog[4]{};                 // near, far (game units), power, max; far 0 = no fog
+			float fogNear[3]{}, fogFar[3]{};
+			bool  valid{ false };           // outdoors with Fallout's sky: use this light
+		};
+		void  Submit(std::uint64_t a_key, std::int32_t a_sx, std::int32_t a_sy, std::int32_t a_sz, std::vector<float>&& a_points, std::vector<std::uint8_t>&& a_faces);
+		void  Remove(std::uint64_t a_key);
+		void  Clear();
+		bool  Fetch(std::uint64_t a_key, std::uint64_t& a_version, std::vector<std::uint8_t>& a_out);  // render thread
+		Light Current();
+		void  Update(RE::TESObjectCELL* a_cell, const McVec& a_player);  // main thread
+	}
+
+	// Drawing the blocks inside Fallout's frame, before its post-processing (fo_inject.cpp).
+	namespace Inject
+	{
+		void Install(::ID3D11DeviceContext* a_context);
+		bool InjectedThisFrame();
+		void EndFrame(std::uint32_t a_width, std::uint32_t a_height);  // at Present
+		void SetTruth(std::string a_text);  // (unused)
+		// Main thread: what is really at the centre of the screen (Fallout's collision), to measure
+		// Fallout's G-buffer encoding against.
+		void SetTruthNormal(bool a_valid, float a_dist, const float a_n[3], const float a_right[3], const float a_up[3], const float a_fwd[3]);
+		bool GBufferThisFrame();  // the solid blocks went into Fallout's G-buffer this frame
 	}
 
 	// Minecraft blocks as Fallout collision, so NPCs (and Fallout's physics) bump into builds.

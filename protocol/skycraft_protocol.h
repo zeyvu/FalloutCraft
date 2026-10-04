@@ -343,7 +343,7 @@ namespace skycraft::proto
 	enum RenType : std::uint32_t
 	{
 		kRenPad = 0,
-		kRenAtlas = 1,     // RenAtlas + RGBA8 pixels (w * h * 4), top row first
+		kRenAtlas = 1,     // RenAtlas + RGBA8 pixels, top row first: all w * h, or the first rows (the rest follow as kRenAtlasRegion strips)
 		kRenSection = 2,   // RenSection + RenVertex[vertexCount] (triangle list); 0 vertices = remove
 		kRenClearAll = 3,  // drop every section (world change)
 		kRenTexture = 4,   // RenTexture + RGBA8 pixels: an entity texture (player skin, armour, ...)

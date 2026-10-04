@@ -29,8 +29,11 @@ import net.minecraft.client.renderer.OrderedSubmitNodeCollector;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.block.ModelBlockRenderer;
 import net.minecraft.client.renderer.block.MovingBlockRenderState;
+// Fabric renderer API (left out of the other builds: see tools/preprocess.py)
+//#if FABRIC
 import net.fabricmc.fabric.api.client.renderer.v1.mesh.MeshView;
 import net.fabricmc.fabric.api.client.renderer.v1.mesh.QuadAtlas;
+//#endif
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.entity.state.ArmedEntityRenderState;
@@ -733,6 +736,7 @@ final class AvatarExporter implements SubmitNodeCollector {
 		}
 	}
 
+	//#if FABRIC
 	// Fabric's renderer API routes block models and items through its own variants (which also
 	// carry a Fabric mesh): lit TNT, held items, blocks held by endermen all come this way.
 
@@ -771,6 +775,7 @@ final class AvatarExporter implements SubmitNodeCollector {
 			}
 		});
 	}
+	//#endif
 
 	/** Falling sand, gravel, anvils, concrete powder: Minecraft's block renderer, posed. */
 	@Override

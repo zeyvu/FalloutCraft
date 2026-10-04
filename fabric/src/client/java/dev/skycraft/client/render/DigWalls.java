@@ -7,7 +7,11 @@ import java.util.List;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+//#if MC_1_21_1
+//$$ import net.minecraft.client.renderer.LightTexture;
+//#else
 import net.minecraft.util.LightCoordsUtil;
+//#endif
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -54,7 +58,11 @@ final class DigWalls {
 				if (level.getBlockState(cell).canOcclude()) {
 					continue; // a solid block fills the dug cell: nothing to see from in it
 				}
+				//#if MC_1_21_1
+				//$$ emit.light = LightTexture.pack(level.getBrightness(LightLayer.BLOCK, cell), level.getBrightness(LightLayer.SKY, cell));
+				//#else
 				emit.light = LightCoordsUtil.pack(level.getBrightness(LightLayer.BLOCK, cell), level.getBrightness(LightLayer.SKY, cell));
+				//#endif
 				for (Direction dir : WALLS) {
 					int nx = x + dir.getStepX(), ny = y + dir.getStepY(), nz = z + dir.getStepZ();
 					if (lookup.isDug(nx, ny, nz) || level.getBlockState(new BlockPos(nx, ny, nz)).canOcclude()) {

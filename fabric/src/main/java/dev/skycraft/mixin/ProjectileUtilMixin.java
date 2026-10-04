@@ -14,8 +14,14 @@ import org.spongepowered.asm.mixin.injection.At;
 @Mixin(ProjectileUtil.class)
 public abstract class ProjectileUtilMixin {
 	@WrapOperation(
+//#if MC_1_21_1
+//$$ 		// 1.21.1 has no spears (getHitEntitiesAlong), and getHitResult uses level.clip.
+//$$ 		method = "getHitResult",
+//$$ 		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;clip(Lnet/minecraft/world/level/ClipContext;)Lnet/minecraft/world/phys/BlockHitResult;")
+//#else
 		method = { "getHitResult", "getHitEntitiesAlong" },
 		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;clipIncludingBorder(Lnet/minecraft/world/level/ClipContext;)Lnet/minecraft/world/phys/BlockHitResult;")
+//#endif
 	)
 	private static BlockHitResult skycraft$hitSkyrim(Level level, ClipContext context, Operation<BlockHitResult> original) {
 		return SkyClip.refine(context.getFrom(), context.getTo(), original.call(level, context), SkyClip.Use.PROJECTILE);

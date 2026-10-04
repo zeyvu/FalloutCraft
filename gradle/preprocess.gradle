@@ -1,0 +1,142 @@
+// FalloutCraft: the mod's shared code (fabric/src, written for Fabric + Minecraft 26.x) turned into
+// the sources of another target. Same rules as tools/preprocess.py (read that for the details):
+//   //#if EXPR / //#elif EXPR / //#else / //#endif    branches that don't apply are blanked;
+//   "//$$ code" lines in the branch that applies become "code";
+//   whole-word renames per Minecraft version; overlay folders whose files replace shared ones.
+//
+// A build uses it like this (paths relative to the build's folder):
+//   apply from: '../gradle/preprocess.gradle'
+//   def sharedJava = falloutcraftSources(repo: file('..'), defines: ['FORGE', 'MC_26'],
+//           renames: [:], overlays: [], exclude: ['dev/skycraft/fabric/'], excludeFile: null)
+//   sourceSets.main.java.srcDir(sharedJava)
+
+class FalloutcraftPreprocessor {
+	static final java.util.regex.Pattern DIRECTIVE = ~/^\s*\/\/#(if|elif|else|endif)\b\s*(.*?)\s*$/
+	static final java.util.regex.Pattern UNCOMMENT = ~/^(\s*)\/\/\$\$ ?(.*)$/
+
+	static boolean evaluate(String expr, Set<String> defines) {
+		def tokens = (expr =~ /[A-Za-z_][A-Za-z0-9_]*|&&|\|\||!|\(|\)/).collect { it }
+		if (tokens.join('') != expr.replaceAll(/\s+/, '')) {
+			throw new IllegalArgumentException("bad expression: " + expr)
+		}
+		int[] pos = [0]
+		def peek = { pos[0] < tokens.size() ? tokens[pos[0]] : null }
+		def take = { pos[0]++; tokens[pos[0] - 1] }
+		Closure pOr
+		def pNot
+		pNot = {
+			if (peek() == '!') { take(); return !pNot() }
+			if (peek() == '(') {
+				take()
+				boolean v = pOr()
+				if (take() != ')') throw new IllegalArgumentException("missing ) in " + expr)
+				return v
+			}
+			String name = take()
+			if (name == null || !(name ==~ /[A-Za-z_][A-Za-z0-9_]*/)) throw new IllegalArgumentException("bad expression: " + expr)
+			return defines.contains(name)
+		}
+		def pAnd = {
+			boolean v = pNot()
+			while (peek() == '&&') { take(); boolean w = pNot(); v = v && w }
+			return v
+		}
+		pOr = {
+			boolean v = pAnd()
+			while (peek() == '||') { take(); boolean w = pAnd(); v = v || w }
+			return v
+		}
+		boolean v = pOr()
+		if (pos[0] != tokens.size()) throw new IllegalArgumentException("bad expression: " + expr)
+		return v
+	}
+
+	static String process(String text, Set<String> defines, Map<String, String> renames, String path) {
+		def out = new StringBuilder(text.length())
+		def stack = [] // [parentActive, active, taken]
+		boolean active = true
+		int n = 0
+		for (String line : text.replace('\r\n', '\n').split('\n', -1)) {
+			n++
+			if (n > 1) out.append('\n')
+			def m = DIRECTIVE.matcher(line)
+			if (m.matches()) {
+				String kind = m.group(1), expr = m.group(2)
+				if (kind == 'if') {
+					boolean v = evaluate(expr, defines)
+					stack << [active, active && v, v]
+					active = active && v
+				} else if (kind == 'elif') {
+					if (stack.isEmpty()) throw new IllegalArgumentException("${path}:${n}: #elif without #if")
+					def top = stack[-1]
+					boolean v = !top[2] && evaluate(expr, defines)
+					stack[-1] = [top[0], top[0] && v, top[2] || v]
+					active = top[0] && v
+				} else if (kind == 'else') {
+					if (stack.isEmpty()) throw new IllegalArgumentException("${path}:${n}: #else without #if")
+					def top = stack[-1]
+					stack[-1] = [top[0], top[0] && !top[2], true]
+					active = top[0] && !top[2]
+				} else {
+					if (stack.isEmpty()) throw new IllegalArgumentException("${path}:${n}: #endif without #if")
+					active = stack.remove(stack.size() - 1)[0]
+				}
+				continue
+			}
+			if (!active) continue
+			def u = UNCOMMENT.matcher(line)
+			if (u.matches()) line = u.group(1) + u.group(2)
+			renames.each { String a, String b -> line = line.replaceAll('\\b' + java.util.regex.Pattern.quote(a) + '\\b', b) }
+			out.append(line)
+		}
+		if (!stack.isEmpty()) throw new IllegalArgumentException("${path}: unclosed #if")
+		return out.toString()
+	}
+
+	static void generate(List<File> roots, Collection<String> exclude, Set<String> defines, Map<String, String> renames, File outDir) {
+		def files = new LinkedHashMap<String, File>()
+		roots.eachWithIndex { File root, int index ->
+			if (!root.isDirectory()) return
+			root.eachFileRecurse(groovy.io.FileType.FILES) { File f ->
+				// (an empty overlay file is no overlay: the shared file is used)
+				if (f.name.endsWith('.java') && (index < 2 || f.getText('UTF-8').trim())) {
+					files[root.toPath().relativize(f.toPath()).toString().replace('\\', '/')] = f
+				}
+			}
+		}
+		outDir.deleteDir()
+		files.each { String rel, File f ->
+			if (exclude.any { rel.startsWith(it) }) return
+			def dst = new File(outDir, rel)
+			dst.parentFile.mkdirs()
+			dst.setText(process(f.getText('UTF-8'), defines, renames, f.path), 'UTF-8')
+		}
+	}
+}
+
+ext.falloutcraftSources = { Map cfg ->
+	File repo = cfg.repo
+	List<File> roots = [new File(repo, 'fabric/src/main/java'), new File(repo, 'fabric/src/client/java')] +
+		(cfg.overlays ?: []).collect { new File(repo, it as String) }
+	Set<String> defines = (cfg.defines ?: []) as Set<String>
+	Map<String, String> renames = (cfg.renames ?: [:]) as Map<String, String>
+	List<String> exclude = (cfg.exclude ?: []) as List<String>
+	// excludeFile: a list of paths (one per line, # comments), e.g. versions/1.21.1/exclude.txt
+	if (cfg.excludeFile) {
+		File list = new File(repo, cfg.excludeFile as String)
+		exclude = exclude + list.readLines('UTF-8').collect { it.trim() }.findAll { it && !it.startsWith('#') }
+	}
+	File outDir = project.layout.buildDirectory.dir('shared/java').get().asFile
+	return tasks.register('sharedJava') {
+		group = 'falloutcraft'
+		description = 'Makes this build\'s copy of the shared sources (gradle/preprocess.gradle)'
+		roots.each { if (it.isDirectory()) inputs.dir(it) }
+		inputs.property('defines', defines.sort().join(','))
+		inputs.property('renames', renames.toString())
+		inputs.property('exclude', exclude.join(','))
+		outputs.dir(outDir)
+		doLast {
+			FalloutcraftPreprocessor.generate(roots, exclude, defines, renames, outDir)
+		}
+	}
+}

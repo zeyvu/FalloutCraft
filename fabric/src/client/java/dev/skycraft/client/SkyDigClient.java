@@ -13,7 +13,7 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import java.util.ArrayList;
 import java.util.List;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import dev.skycraft.client.platform.ClientPlatform;
 import net.minecraft.client.particle.TerrainParticle;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.resources.sounds.SoundInstance;
@@ -105,7 +105,7 @@ public final class SkyDigClient {
 				.setPower(0.2F).scale(0.6F));
 		}
 		if (progress >= 1.0F) {
-			ClientPlayNetworking.send(new SkyNet.DigOpen(world(), pos, material));
+			ClientPlatform.get().sendToServer(new SkyNet.DigOpen(world(), pos, material));
 			REVEAL.put(pos.asLong(), REVEAL_TRIES); // what's around it: blocks, or walls
 			mining = null;
 			progress = 0.0F;
@@ -205,13 +205,13 @@ public final class SkyDigClient {
 		}
 		for (int i = 0; i < cells.size(); i += 64) {
 			int end = Math.min(cells.size(), i + 64);
-			ClientPlayNetworking.send(new SkyNet.DigReveal(world, List.copyOf(cells.subList(i, end)), List.copyOf(materials.subList(i, end))));
+			ClientPlatform.get().sendToServer(new SkyNet.DigReveal(world, List.copyOf(cells.subList(i, end)), List.copyOf(materials.subList(i, end))));
 		}
 	}
 
 	/** Dug cells of this section in the current Skyrim world, or null. */
 	public static long @Nullable [] dugBits(LevelChunk chunk, int sectionY) {
-		SkyDig.DugColumn column = chunk.getAttached(SkyDig.DUG);
+		SkyDig.DugColumn column = SkyDig.attached(chunk);
 		return column == null ? null : column.bits(world(), sectionY);
 	}
 
@@ -232,13 +232,17 @@ public final class SkyDigClient {
 		int pcx = minecraft.player.getBlockX() >> 4, pcz = minecraft.player.getBlockZ() >> 4;
 		for (int cx = pcx - radius; cx <= pcx + radius; cx++) {
 			for (int cz = pcz - radius; cz <= pcz + radius; cz++) {
+				//#if MC_1_21_1
+				//$$ long key = ChunkPos.asLong(cx, cz);
+				//#else
 				long key = ChunkPos.pack(cx, cz);
+				//#endif
 				LevelChunk chunk = level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
 				if (chunk == null) {
 					SEEN.remove(key);
 					continue;
 				}
-				SkyDig.DugColumn column = chunk.getAttached(SkyDig.DUG);
+				SkyDig.DugColumn column = SkyDig.attached(chunk);
 				if (column == null) {
 					column = NONE;
 				}

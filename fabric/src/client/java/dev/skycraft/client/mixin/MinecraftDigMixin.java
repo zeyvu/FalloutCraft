@@ -17,8 +17,12 @@ public abstract class MinecraftDigMixin {
 		Minecraft minecraft = (Minecraft) (Object) this;
 		if (SkyDigClient.attack(minecraft)) {
 			// A swing, not a miss: no miss cooldown before mining the block that appears.
+			//#if MC_1_21_1
+			//$$ minecraft.player.swing(InteractionHand.MAIN_HAND);
+			//#else
 			var held = minecraft.player.getItemInHand(InteractionHand.MAIN_HAND);
 			minecraft.player.swing(InteractionHand.MAIN_HAND, held.getAttackAnimation(), false);
+			//#endif
 			cir.setReturnValue(true);
 		}
 	}

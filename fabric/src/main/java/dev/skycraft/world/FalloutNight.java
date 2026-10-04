@@ -4,7 +4,6 @@ import dev.skycraft.SkyCraft;
 import dev.skycraft.link.SkyLink;
 import java.util.List;
 import java.util.Locale;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -44,10 +43,6 @@ public final class FalloutNight {
 	private FalloutNight() {
 	}
 
-	public static void init() {
-		ServerTickEvents.END_SERVER_TICK.register(FalloutNight::tick);
-	}
-
 	/** Fallout's hour (0-24), or NaN without a link. */
 	private static float falloutHour() {
 		if (!SkyLink.active() || !SkyLink.readSkyState(SKY)) {
@@ -65,7 +60,8 @@ public final class FalloutNight {
 		return far < INTERIOR_FROM || far >= INTERIOR_TO;
 	}
 
-	private static void tick(MinecraftServer server) {
+	/** End of every server tick (registered by the mod loader). */
+	public static void tick(MinecraftServer server) {
 		List<ServerPlayer> players = server.getPlayerList().getPlayers();
 		if (players.isEmpty() || server.getTickCount() % 5 != 0) {
 			return;
@@ -78,9 +74,17 @@ public final class FalloutNight {
 			syncClock(server, hour);
 		}
 		ServerPlayer player = players.getFirst();
+		//#if MC_1_21_1
+		//$$ ServerLevel level = player.serverLevel();
+		//#else
 		ServerLevel level = player.level();
+		//#endif
 		AABB around = player.getBoundingBox().inflate(96.0);
+		//#if MC_1_21_1
+		//$$ List<Mob> mobs = level.getEntitiesOfClass(Mob.class, around, m -> m.isAlive() && m.getTags().contains(TAG));
+		//#else
 		List<Mob> mobs = level.getEntitiesOfClass(Mob.class, around, m -> m.isAlive() && m.entityTags().contains(TAG));
+		//#endif
 
 		for (Mob mob : mobs) {
 			chase(mob);
@@ -155,7 +159,11 @@ public final class FalloutNight {
 			return;
 		}
 		double d2 = mob.distanceToSqr(target);
+		//#if MC_1_21_1
+		//$$ double keep = mob.getTags().contains(RANGED_TAG) ? 8.0 * 8.0 : 1.2 * 1.2;
+		//#else
 		double keep = mob.entityTags().contains(RANGED_TAG) ? 8.0 * 8.0 : 1.2 * 1.2;
+		//#endif
 		if (d2 <= keep || d2 > 48.0 * 48.0) {
 			return;
 		}

@@ -16,6 +16,16 @@ import org.spongepowered.asm.mixin.injection.At;
  */
 @Mixin(Camera.class)
 public abstract class CameraZoomMixin {
+	//#if MC_1_21_1
+	//$$ // 1.21.1: Camera.level is a BlockGetter, so the call is BlockGetter.clip.
+	//$$ @WrapOperation(
+	//$$ 	method = "getMaxZoom",
+	//$$ 	at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/BlockGetter;clip(Lnet/minecraft/world/level/ClipContext;)Lnet/minecraft/world/phys/BlockHitResult;")
+	//$$ )
+	//$$ private BlockHitResult skycraft$zoomAgainstSkyrim(net.minecraft.world.level.BlockGetter level, ClipContext context, Operation<BlockHitResult> original) {
+	//$$ 	return SkyClip.refine(context.getFrom(), context.getTo(), original.call(level, context), SkyClip.Use.PROJECTILE);
+	//$$ }
+	//#else
 	@WrapOperation(
 		method = "getMaxZoom",
 		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;clip(Lnet/minecraft/world/level/ClipContext;)Lnet/minecraft/world/phys/BlockHitResult;")
@@ -23,4 +33,5 @@ public abstract class CameraZoomMixin {
 	private BlockHitResult skycraft$zoomAgainstSkyrim(Level level, ClipContext context, Operation<BlockHitResult> original) {
 		return SkyClip.refine(context.getFrom(), context.getTo(), original.call(level, context), SkyClip.Use.PROJECTILE);
 	}
+	//#endif
 }

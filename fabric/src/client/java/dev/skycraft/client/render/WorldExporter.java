@@ -130,8 +130,7 @@ public final class WorldExporter {
 		blockRenderer = new ModelBlockRenderer(ao, true, minecraft.getBlockColors());
 		fluidRenderer = new FluidRenderer(minecraft.getModelManager().getFluidStateModelSet());
 		SkyLink.writeRender(Proto.REN_CLEAR_ALL, ByteBuffer.allocate(0), null);
-		ByteBuffer header = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putInt(atlas.width).putInt(atlas.height).flip();
-		boolean ok = SkyLink.writeRender(Proto.REN_ATLAS, header, atlas.pixels.duplicate().clear());
+		boolean ok = SkyLink.writeAtlas(atlas.width, atlas.height, atlas.pixels);
 		SkyCraft.LOG.info("SkyCraft: sent {}x{} texture atlas to Skyrim ({})", atlas.width, atlas.height, ok ? "ok" : "FAILED");
 		SENT.clear();
 		LIT.clear();

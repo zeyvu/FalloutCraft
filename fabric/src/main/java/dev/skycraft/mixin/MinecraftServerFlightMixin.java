@@ -13,7 +13,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(MinecraftServer.class)
 public abstract class MinecraftServerFlightMixin {
+//#if MC_1_21_1
+//$$ 	@Inject(method = "isFlightAllowed", at = @At("HEAD"), cancellable = true)
+//#else
 	@Inject(method = "allowFlight", at = @At("HEAD"), cancellable = true)
+//#endif
 	private void skycraft$guestsStandOnTheirSkyrim(CallbackInfoReturnable<Boolean> cir) {
 		if (SkyLink.active()) {
 			cir.setReturnValue(true);

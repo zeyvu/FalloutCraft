@@ -29,10 +29,12 @@ public abstract class ServerPlayerMixin {
 		ServerPlayer self = (ServerPlayer) (Object) this;
 		int attacker = SkyCombat.attackerFormId(source);
 		if (!dev.skycraft.net.SkyNet.isHost(self)) {
-			if (net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.canSend(self, dev.skycraft.net.SkyNet.Died.TYPE)) {
-				net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(self, new dev.skycraft.net.SkyNet.Died(attacker));
-			}
+			dev.skycraft.platform.Platform.get().sendToPlayer(self, new dev.skycraft.net.SkyNet.Died(attacker));
+//#if MC_1_21_1
+//$$ 			SkyCraft.LOG.info("SkyCraft: guest {} died ({}); telling their Skyrim", self.getName().getString(), source.getMsgId());
+//#else
 			SkyCraft.LOG.info("SkyCraft: guest {} died ({}); telling their Skyrim", self.getPlainTextName(), source.getMsgId());
+//#endif
 			return;
 		}
 		if (SkyLink.active()) {

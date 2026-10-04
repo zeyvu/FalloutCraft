@@ -5,8 +5,6 @@ import dev.skycraft.combat.SkyCombat;
 import dev.skycraft.world.SkyDig;
 import java.util.List;
 import net.minecraft.core.BlockPos;
-import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -83,31 +81,34 @@ public final class SkyNet {
 		}
 	}
 
-	public static void init() {
-		PayloadTypeRegistry.serverboundPlay().register(Hurt.TYPE, Hurt.CODEC);
-		PayloadTypeRegistry.serverboundPlay().register(DigOpen.TYPE, DigOpen.CODEC);
-		PayloadTypeRegistry.serverboundPlay().register(DigReveal.TYPE, DigReveal.CODEC);
-		ServerPlayNetworking.registerGlobalReceiver(DigOpen.TYPE, (payload, context) -> {
-			ServerPlayer player = context.player();
-			context.server().execute(() -> SkyDig.open(player, payload.world(), payload.pos(), payload.material()));
-		});
-		ServerPlayNetworking.registerGlobalReceiver(DigReveal.TYPE, (payload, context) -> {
-			ServerPlayer player = context.player();
-			int[] materials = payload.materials().stream().mapToInt(Integer::intValue).toArray();
-			context.server().execute(() -> SkyDig.reveal(player, payload.world(), payload.cells(), materials));
-		});
-		PayloadTypeRegistry.clientboundPlay().register(Died.TYPE, Died.CODEC);
-		ServerPlayNetworking.registerGlobalReceiver(Hurt.TYPE, (payload, context) -> {
-			ServerPlayer player = context.player();
-			// A hit's worth of damage, whatever the guest's client claims (friends only, but still).
-			float damage = Math.max(0.0F, Math.min(payload.skyrimDamage(), 10000.0F));
-			context.server().execute(() -> SkyCombat.hurtPlayer(player, payload.kind(), damage, payload.attackerFormId(), payload.flags()));
-		});
+	// Each mod loader registers the payloads above (Fabric: dev.skycraft.fabric.SkyCraftFabric,
+	// Forge: dev.skycraft.forge.ForgeNet) and hands what arrives to these, on the server thread.
+
+	/** A client mined Skyrim's geometry out of a cell. */
+	public static void onDigOpen(ServerPlayer player, DigOpen payload) {
+		SkyDig.open(player, payload.world(), payload.pos(), payload.material());
+	}
+
+	/** A client found cells inside Skyrim's geometry around a broken dug block. */
+	public static void onDigReveal(ServerPlayer player, DigReveal payload) {
+		int[] materials = payload.materials().stream().mapToInt(Integer::intValue).toArray();
+		SkyDig.reveal(player, payload.world(), payload.cells(), materials);
+	}
+
+	/** A guest's Skyrim hit them. */
+	public static void onHurt(ServerPlayer player, Hurt payload) {
+		// A hit's worth of damage, whatever the guest's client claims (friends only, but still).
+		float damage = Math.max(0.0F, Math.min(payload.skyrimDamage(), 10000.0F));
+		SkyCombat.hurtPlayer(player, payload.kind(), damage, payload.attackerFormId(), payload.flags());
 	}
 
 	/** True if this player plays on this machine (their Skyrim is on the shared-memory link). */
 	public static boolean isHost(ServerPlayer player) {
 		var server = player.level().getServer();
+		//#if MC_1_21_1
+		//$$ return server != null && server.isSingleplayerOwner(player.getGameProfile());
+		//#else
 		return server != null && server.isSingleplayerOwner(player.nameAndId());
+		//#endif
 	}
 }

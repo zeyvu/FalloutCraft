@@ -1,16 +1,17 @@
 package dev.skycraft.world;
 
 import static dev.skycraft.link.Proto.*;
-import static java.lang.foreign.ValueLayout.*;
 
 import dev.skycraft.SkyCraft;
+import dev.skycraft.link.Shm;
 import dev.skycraft.link.SkyLink;
-import java.lang.foreign.MemorySegment;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.BlockPos;
+//#if !MC_1_21_1
 import net.minecraft.world.phys.shapes.BitSetDiscreteVoxelShape;
 import net.minecraft.world.phys.shapes.CubeVoxelShape;
+//#endif
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jspecify.annotations.Nullable;
@@ -223,7 +224,7 @@ public final class SkyCollision {
 
 	/** Processes all pending collision messages. Returns true if anything was consumed. */
 	private static boolean drainOnce() {
-		MemorySegment s = SkyLink.segment();
+		Shm s = SkyLink.segment();
 		if (s == null) {
 			return false;
 		}
@@ -235,15 +236,15 @@ public final class SkyCollision {
 		long data = OFF_COLLISION_RING + CR_DATA;
 		while (tail < head) {
 			long pos = tail % CR_DATA_BYTES;
-			int type = s.get(JAVA_INT, data + pos);
-			int payloadBytes = s.get(JAVA_INT, data + pos + 4);
+			int type = s.getInt(data + pos);
+			int payloadBytes = s.getInt(data + pos + 4);
 			if (type == COL_PAD) {
 				tail += CR_DATA_BYTES - pos;
 				continue;
 			}
 			long payload = data + pos + 8;
 			switch (type) {
-				case COL_CLEAR -> clear(s.get(JAVA_INT, payload));
+				case COL_CLEAR -> clear(s.getInt(payload));
 				case COL_REGION -> readRegion(s, payload);
 				case COL_TRIS -> readTris(s, payload);
 				default -> SkyCraft.LOG.warn("SkyCraft: unknown collision message {}", type);
@@ -277,15 +278,15 @@ public final class SkyCollision {
 		SkyCraft.LOG.info("SkyCraft: collision cleared (epoch {})", newEpoch);
 	}
 
-	private static void readRegion(MemorySegment s, long p) {
-		int minX = s.get(JAVA_INT, p);
-		int minY = s.get(JAVA_INT, p + 4);
-		int minZ = s.get(JAVA_INT, p + 8);
-		int maxX = s.get(JAVA_INT, p + 12);
-		int maxY = s.get(JAVA_INT, p + 16);
-		int maxZ = s.get(JAVA_INT, p + 20);
-		int msgEpoch = s.get(JAVA_INT, p + 24);
-		int count = s.get(JAVA_INT, p + 28);
+	private static void readRegion(Shm s, long p) {
+		int minX = s.getInt(p);
+		int minY = s.getInt(p + 4);
+		int minZ = s.getInt(p + 8);
+		int maxX = s.getInt(p + 12);
+		int maxY = s.getInt(p + 16);
+		int maxZ = s.getInt(p + 20);
+		int msgEpoch = s.getInt(p + 24);
+		int count = s.getInt(p + 28);
 		adoptEpochIfFresh(msgEpoch);
 		if (msgEpoch != epoch) {
 			return; // stale region from before a world change
@@ -296,9 +297,9 @@ public final class SkyCollision {
 		java.util.HashMap<Long, Integer> freshFill = new java.util.HashMap<>(count * 2);
 		long e = p + COL_REGION_HEADER_BYTES;
 		for (int i = 0; i < count; i++, e += COL_BLOCK_BYTES) {
-			int x = s.get(JAVA_INT, e);
-			int y = s.get(JAVA_INT, e + 4);
-			int z = s.get(JAVA_INT, e + 8);
+			int x = s.getInt(e);
+			int y = s.getInt(e + 4);
+			int z = s.getInt(e + 8);
 			VoxelShape shape = buildShape(s, e + 16);
 			if (shape != null) {
 				long key = BlockPos.asLong(x, y, z);
@@ -332,12 +333,12 @@ public final class SkyCollision {
 		}
 	}
 
-	private static void readTris(MemorySegment s, long p) {
-		int minX = s.get(JAVA_INT, p);
-		int minY = s.get(JAVA_INT, p + 4);
-		int minZ = s.get(JAVA_INT, p + 8);
-		int msgEpoch = s.get(JAVA_INT, p + 24);
-		int count = s.get(JAVA_INT, p + 28);
+	private static void readTris(Shm s, long p) {
+		int minX = s.getInt(p);
+		int minY = s.getInt(p + 4);
+		int minZ = s.getInt(p + 8);
+		int msgEpoch = s.getInt(p + 24);
+		int count = s.getInt(p + 28);
 		adoptEpochIfFresh(msgEpoch);
 		if (msgEpoch != epoch) {
 			return;
@@ -350,10 +351,10 @@ public final class SkyCollision {
 		long e = p + COL_REGION_HEADER_BYTES;
 		for (int i = 0; i < count; i++, e += COL_TRI_BYTES) {
 			for (int k = 0; k < 9; k++) {
-				v[k] = s.get(JAVA_FLOAT, e + k * 4L);
+				v[k] = s.getFloat(e + k * 4L);
 				hash = hash * 31 + Float.floatToRawIntBits(v[k]);
 			}
-			int flags = s.get(JAVA_INT, e + 36);
+			int flags = s.getInt(e + 36);
 			hash = hash * 31 + flags;
 			SkyTri t = new SkyTri(v, 0, flags);
 			if (t.degenerate()) {
@@ -386,12 +387,12 @@ public final class SkyCollision {
 		return n;
 	}
 
-	private static int fillInfo(MemorySegment s, long bitsOff) {
+	private static int fillInfo(Shm s, long bitsOff) {
 		int count = 0;
 		int info = 0;
 		int top = 0;
 		for (int y = 0; y < 8; y++) {
-			long layer = s.get(JAVA_LONG, bitsOff + y * 8L);
+			long layer = s.getLong(bitsOff + y * 8L);
 			count += Long.bitCount(layer);
 			if (layer != 0) {
 				info |= y < 4 ? FILL_LOWER : FILL_UPPER;
@@ -401,12 +402,12 @@ public final class SkyCollision {
 		return info | count | top << FILL_TOP_SHIFT;
 	}
 
-	private static @Nullable VoxelShape buildShape(MemorySegment s, long bitsOff) {
+	private static @Nullable VoxelShape buildShape(Shm s, long bitsOff) {
 		boolean any = false;
 		boolean full = true;
 		long[] layers = new long[8];
 		for (int y = 0; y < 8; y++) {
-			layers[y] = s.get(JAVA_LONG, bitsOff + y * 8L);
+			layers[y] = s.getLong(bitsOff + y * 8L);
 			any |= layers[y] != 0;
 			full &= layers[y] == -1L;
 		}
@@ -416,6 +417,27 @@ public final class SkyCollision {
 		if (full) {
 			return Shapes.block();
 		}
+		//#if MC_1_21_1
+		//$$ // 1.21.1's CubeVoxelShape constructor isn't public: join 1/8-aligned boxes instead. Shapes makes
+		//$$ // those into 8x8x8 cube shapes and joins them cell by cell, so the result is the same grid shape.
+		//$$ VoxelShape shape = Shapes.empty();
+		//$$ for (int y = 0; y < 8; y++) {
+		//$$ 	for (int z = 0; z < 8; z++) {
+		//$$ 		int row = (int) (layers[y] >>> (z * 8)) & 0xFF; // bit x of row z
+		//$$ 		while (row != 0) {
+		//$$ 			int x0 = Integer.numberOfTrailingZeros(row);
+		//$$ 			int x1 = x0;
+		//$$ 			while (x1 < 8 && (row & (1 << x1)) != 0) {
+		//$$ 				x1++;
+		//$$ 			}
+		//$$ 			row &= ~((1 << x1) - (1 << x0));
+		//$$ 			shape = Shapes.joinUnoptimized(shape, Shapes.box(x0 / 8.0, y / 8.0, z / 8.0, x1 / 8.0, (y + 1) / 8.0, (z + 1) / 8.0),
+		//$$ 				net.minecraft.world.phys.shapes.BooleanOp.OR);
+		//$$ 		}
+		//$$ 	}
+		//$$ }
+		//$$ return shape;
+		//#else
 		BitSetDiscreteVoxelShape discrete = new BitSetDiscreteVoxelShape(8, 8, 8);
 		for (int y = 0; y < 8; y++) {
 			long layer = layers[y];
@@ -426,5 +448,6 @@ public final class SkyCollision {
 			}
 		}
 		return new CubeVoxelShape(discrete);
+		//#endif
 	}
 }

@@ -13,6 +13,22 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /** Keyboard state and mouse capture come from Skyrim while linked, not from SDL. */
 @Mixin(InputConstants.class)
 public abstract class InputConstantsMixin {
+	//#if MC_1_21_1
+	//$$ @Inject(method = "isKeyDown", at = @At("HEAD"), cancellable = true)
+	//$$ private static void skycraft$isKeyDown(long window, int key, CallbackInfoReturnable<Boolean> cir) {
+	//$$ 	if (SkyClient.tookOver()) {
+	//$$ 		cir.setReturnValue(InputBridge.isKeyDown(key));
+	//$$ 	}
+	//$$ }
+	//$$
+	//$$ // 1.21.1 (GLFW): one method both grabs and releases the mouse.
+	//$$ @Inject(method = "grabOrReleaseMouse", at = @At("HEAD"), cancellable = true)
+	//$$ private static void skycraft$grabOrReleaseMouse(long window, int cursorMode, double xpos, double ypos, CallbackInfo ci) {
+	//$$ 	if (SkyClient.tookOver()) {
+	//$$ 		ci.cancel();
+	//$$ 	}
+	//$$ }
+	//#else
 	@Inject(method = "isKeyDown", at = @At("HEAD"), cancellable = true)
 	private static void skycraft$isKeyDown(int key, CallbackInfoReturnable<Boolean> cir) {
 		if (SkyClient.tookOver()) {
@@ -33,4 +49,5 @@ public abstract class InputConstantsMixin {
 			ci.cancel();
 		}
 	}
+	//#endif
 }

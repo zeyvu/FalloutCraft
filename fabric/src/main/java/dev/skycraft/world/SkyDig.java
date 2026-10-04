@@ -5,14 +5,12 @@ import static dev.skycraft.link.Proto.*;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import dev.skycraft.SkyCraft;
+import dev.skycraft.platform.Platform;
 import io.netty.buffer.ByteBuf;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.LongStream;
-import net.fabricmc.fabric.api.attachment.v1.AttachmentRegistry;
-import net.fabricmc.fabric.api.attachment.v1.AttachmentSyncPredicate;
-import net.fabricmc.fabric.api.attachment.v1.AttachmentType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -58,7 +56,7 @@ public final class SkyDig {
 
 	/** One section's dug cells in one Skyrim world: bit x + 16z + 256y. */
 	public record DugSection(int world, int sectionY, long[] bits) {
-		static final Codec<DugSection> CODEC = RecordCodecBuilder.create(i -> i.group(
+		public static final Codec<DugSection> CODEC = RecordCodecBuilder.create(i -> i.group(
 			Codec.INT.fieldOf("world").forGetter(DugSection::world),
 			Codec.INT.fieldOf("y").forGetter(DugSection::sectionY),
 			Codec.LONG_STREAM.xmap(LongStream::toArray, Arrays::stream).fieldOf("bits").forGetter(DugSection::bits)
@@ -68,8 +66,8 @@ public final class SkyDig {
 	/** A chunk's dug cells. Immutable: changes make a new one (so the attachment syncs). */
 	public record DugColumn(List<DugSection> sections) {
 		public static final DugColumn EMPTY = new DugColumn(List.of());
-		static final Codec<DugColumn> CODEC = DugSection.CODEC.listOf().xmap(DugColumn::new, DugColumn::sections);
-		static final StreamCodec<ByteBuf, DugColumn> STREAM_CODEC = new StreamCodec<>() {
+		public static final Codec<DugColumn> CODEC = DugSection.CODEC.listOf().xmap(DugColumn::new, DugColumn::sections);
+		public static final StreamCodec<ByteBuf, DugColumn> STREAM_CODEC = new StreamCodec<>() {
 			@Override
 			public DugColumn decode(ByteBuf buf) {
 				int n = ByteBufCodecs.VAR_INT.decode(buf);
@@ -138,18 +136,20 @@ public final class SkyDig {
 		}
 	}
 
-	public static final AttachmentType<DugColumn> DUG = AttachmentRegistry.<DugColumn>builder()
-		.persistent(DugColumn.CODEC)
-		.syncWith(DugColumn.STREAM_CODEC, AttachmentSyncPredicate.all())
-		.buildAndRegister(Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "dug"));
+	/** Where a chunk's dug cells are kept (the mod loader's per-chunk data, saved and synced). */
+	public static final Identifier DUG_ID = Identifier.fromNamespaceAndPath(SkyCraft.MOD_ID, "dug");
 
-	/** Loads the class (registers the attachment) at mod start. */
 	public static void init() {
-		SkyCraft.LOG.info("SkyCraft: digging into Skyrim registered ({})", DUG.identifier());
+		SkyCraft.LOG.info("SkyCraft: digging into Skyrim registered ({})", DUG_ID);
+	}
+
+	/** The chunk's dug cells, or null for none (any thread). */
+	public static @Nullable DugColumn attached(LevelChunk chunk) {
+		return Platform.get().getDug(chunk);
 	}
 
 	public static DugColumn column(LevelChunk chunk) {
-		DugColumn column = chunk.getAttached(DUG);
+		DugColumn column = attached(chunk);
 		return column != null ? column : DugColumn.EMPTY;
 	}
 
@@ -170,7 +170,11 @@ public final class SkyDig {
 	 * with the drops and the sound of mining what it was made of.
 	 */
 	public static void open(ServerPlayer player, int world, BlockPos pos, int material) {
+		//#if MC_1_21_1
+		//$$ ServerLevel level = player.serverLevel();
+		//#else
 		ServerLevel level = player.level();
+		//#endif
 		if (!destruction || !inReach(player, pos, REACH) || !level.isLoaded(pos) || player.isSpectator()) {
 			return;
 		}
@@ -179,7 +183,7 @@ public final class SkyDig {
 		if (column.isDug(world, pos.getX(), pos.getY(), pos.getZ())) {
 			return;
 		}
-		chunk.setAttached(DUG, column.with(world, pos.getX(), pos.getY(), pos.getZ()));
+		Platform.get().setDug(chunk, column.with(world, pos.getX(), pos.getY(), pos.getZ()));
 		BlockState state = materialState(material);
 		if (!player.isCreative()) {
 			ItemStack tool = player.getMainHandItem();
@@ -201,7 +205,11 @@ public final class SkyDig {
 				}
 			}
 		}
+		//#if MC_1_21_1
+		//$$ level.levelEvent(LevelEvent.PARTICLES_DESTROY_BLOCK, pos, Block.getId(state));
+		//#else
 		level.levelEvent(LevelEvent.PARTICLES_AND_SOUND_DESTROY_BLOCK, pos, Block.getId(state));
+		//#endif
 	}
 
 	/** Cells around a mined one that are wholly inside Skyrim's geometry: blocks now. */
@@ -209,7 +217,11 @@ public final class SkyDig {
 		if (!destruction) {
 			return;
 		}
+		//#if MC_1_21_1
+		//$$ ServerLevel level = player.serverLevel();
+		//#else
 		ServerLevel level = player.level();
+		//#endif
 		for (int i = 0; i < cells.size() && i < materials.length; i++) {
 			BlockPos pos = cells.get(i);
 			if (inReach(player, pos, REACH + 4.0) && level.isLoaded(pos)) {
@@ -233,7 +245,7 @@ public final class SkyDig {
 		if (column.isDug(world, pos.getX(), pos.getY(), pos.getZ())) {
 			return false;
 		}
-		chunk.setAttached(DUG, column.with(world, pos.getX(), pos.getY(), pos.getZ()));
+		Platform.get().setDug(chunk, column.with(world, pos.getX(), pos.getY(), pos.getZ()));
 		return true;
 	}
 
@@ -264,13 +276,25 @@ public final class SkyDig {
 			case DIG_SPRUCE_LOG -> Blocks.SPRUCE_LOG.defaultBlockState();
 			case DIG_BIRCH_LOG -> Blocks.BIRCH_LOG.defaultBlockState();
 			case DIG_PLANKS -> Blocks.SPRUCE_PLANKS.defaultBlockState();
+			//#if MC_1_21_1
+			//$$ case DIG_METAL -> Blocks.WAXED_COPPER_BLOCK.defaultBlockState();
+			//#else
 			case DIG_METAL -> Blocks.COPPER_BLOCK.waxed().unaffected().defaultBlockState();
+			//#endif
 			case DIG_GLASS -> Blocks.GLASS.defaultBlockState();
 			case DIG_ORGANIC -> Blocks.MOSS_BLOCK.defaultBlockState();
+			//#if MC_1_21_1
+			//$$ case DIG_CLOTH -> Blocks.BROWN_WOOL.defaultBlockState();
+			//#else
 			case DIG_CLOTH -> Blocks.WOOL.pick(DyeColor.BROWN).defaultBlockState();
+			//#endif
 			case DIG_BONE -> Blocks.BONE_BLOCK.defaultBlockState();
 			case DIG_WEB -> Blocks.COBWEB.defaultBlockState();
+			//#if MC_1_21_1
+			//$$ case DIG_ASH -> Blocks.LIGHT_GRAY_CONCRETE_POWDER.defaultBlockState();
+			//#else
 			case DIG_ASH -> Blocks.CONCRETE_POWDER.pick(DyeColor.LIGHT_GRAY).defaultBlockState();
+			//#endif
 			case DIG_BEDROCK -> Blocks.BEDROCK.defaultBlockState();
 			default -> Blocks.STONE.defaultBlockState();
 		};
@@ -669,7 +693,7 @@ public final class SkyDig {
 
 	private static @Nullable DugColumn columnFor(net.minecraft.world.level.CollisionGetter level, int x, int z) {
 		var chunk = level.getChunkForCollisions(x >> 4, z >> 4);
-		return chunk instanceof LevelChunk lc ? lc.getAttached(DUG) : null;
+		return chunk instanceof LevelChunk lc ? attached(lc) : null;
 	}
 
 	/**

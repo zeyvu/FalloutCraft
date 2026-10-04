@@ -11,8 +11,8 @@
   "license": "MIT",
   "environment": "client",
   "entrypoints": {
-    "main": ["dev.skycraft.SkyCraft"],
-    "client": ["dev.skycraft.client.SkyCraftClient"]
+    "main": ["dev.skycraft.fabric.SkyCraftFabric"],
+    "client": ["dev.skycraft.client.fabric.SkyCraftClientFabric"]
   },
   "mixins": [
     "skycraft.mixins.json",

@@ -66,8 +66,14 @@ public final class DiscordPresence {
 			return m.group().toLowerCase();
 		}
 		for (Component part : message.toFlatList()) {
+			//#if MC_1_21_1
+			//$$ ClickEvent copy = part.getStyle().getClickEvent();
+			//$$ if (copy != null && copy.getAction() == ClickEvent.Action.COPY_TO_CLIPBOARD) {
+			//$$ 	m = E4MC_LINK.matcher(copy.getValue());
+			//#else
 			if (part.getStyle().getClickEvent() instanceof ClickEvent.CopyToClipboard copy) {
 				m = E4MC_LINK.matcher(copy.value());
+			//#endif
 				if (m.find()) {
 					return m.group().toLowerCase();
 				}

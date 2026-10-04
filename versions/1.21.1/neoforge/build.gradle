@@ -1,0 +1,85 @@
+// FalloutCraft for NeoForge, Minecraft 1.21.1 (Java 21).
+//
+// The mod's code lives once, in ../../../fabric/src (written for Minecraft 26.x). This build makes
+// its 1.21.1 NeoForge copy (gradle/preprocess.gradle: //#if MC_1_21_1 / NEOFORGE blocks,
+// Identifier -> ResourceLocation, the overlays in ../common, minus versions/1.21.1/exclude.txt and
+// the Fabric glue) and adds NeoForge's entry point and glue from src/main/java/dev/skycraft/neoforge.
+//
+//   gradlew runClient   (play/test)       gradlew build   -> build/libs/falloutcraft-neoforge-<version>+1.21.1.jar
+
+plugins {
+	id 'java-library'
+	id 'net.neoforged.moddev' version '2.0.148'
+}
+
+def repo = file('../../..')
+def mainProps = new Properties()
+new File(repo, 'fabric/gradle.properties').withInputStream { mainProps.load(it) }
+version = mainProps.getProperty('version') + '+1.21.1'
+group = 'dev.skycraft'
+base.archivesName = 'falloutcraft-neoforge'
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+apply from: new File(repo, 'gradle/preprocess.gradle')
+def sharedJava = falloutcraftSources(
+	repo: repo,
+	defines: ['NEOFORGE', 'MC_1_21_1'],
+	renames: ['Identifier': 'ResourceLocation'],
+	overlays: ['versions/1.21.1/common/src/main/java', 'versions/1.21.1/common/src/client/java'],
+	exclude: ['dev/skycraft/fabric/', 'dev/skycraft/client/fabric/', 'dev/skycraft/mixin/EntitySwimMixin.java'],
+	excludeFile: 'versions/1.21.1/exclude.txt'
+)
+sourceSets.main.java.srcDir(sharedJava)
+// Resources: this build's own (mods.toml, mixin configs) first, then 1.21.1's overlays (dimension
+// type), then the shared ones (Fabric's mod file and mixin configs left out).
+sourceSets.main.resources.srcDir(new File(repo, 'versions/1.21.1/common/src/main/resources'))
+sourceSets.main.resources.srcDir(new File(repo, 'fabric/src/main/resources'))
+sourceSets.main.resources.exclude('fabric.mod.json')
+
+neoForge {
+	version = project.neo_version
+
+	runs {
+		client {
+			client()
+			programArguments.addAll('--username', System.getenv('SKYCRAFT_USERNAME') ?: 'Todd')
+			systemProperty 'skycraft.quitWithSkyrim', 'false'
+		}
+	}
+
+	mods {
+		skycraft {
+			sourceSet(sourceSets.main)
+		}
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	// @Nullable in the shared code (Minecraft 26.x ships it, 1.21.1 doesn't; annotations only).
+	compileOnly 'org.jspecify:jspecify:1.0.0'
+}
+
+processResources {
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+	def version = project.version
+	inputs.property 'version', version
+	filesMatching('META-INF/neoforge.mods.toml') {
+		expand 'version': version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8'
+	options.release = 21
+}
+
+jar {
+	from(new File(repo, 'LICENSE')) {
+		rename { "${it}_falloutcraft" }
+	}
+}

@@ -890,6 +890,7 @@ namespace skycraft
 			if (haveMc && !loading && cell && settleTimer <= 0.0f) {
 				Collision::Get().Update(cell, puppet ? McVec{ mc.x, mc.y, mc.z } : playerMc);
 				BlockCollision::Update(cell, puppet ? McVec{ mc.x, mc.y, mc.z } : playerMc);
+				Shadows::Update(cell, puppet ? McVec{ mc.x, mc.y, mc.z } : playerMc);
 			}
 
 			logTimer -= a_delta;
@@ -918,6 +919,35 @@ namespace skycraft
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
+	}
+
+	bool RayBlocked(RE::TESObjectCELL* a_cell, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to)
+	{
+		RE::NiPoint3 from = a_from;
+		for (int attempt = 0; attempt < 4; ++attempt) {
+			RE::bhkPickData pd;
+			pd.SetStartEnd(from, a_to);
+			pd.castQuery.m_filterData.m_collisionFilterInfo = static_cast<std::uint32_t>(RE::COL_LAYER::kPathingPick);
+			(void)a_cell->Pick(pd);
+			if (!pd.HasHit()) {
+				return false;
+			}
+			const auto* body = pd.GetBody();
+			const int   layer = body ? static_cast<int>(body->m_collisionFilterInfo & 0x7F) : 0x7F;
+			if ((body && BlockCollision::Owns(body->m_shape)) || GroundLayer(layer)) {
+				return true;
+			}
+			// Something that casts no shadow (an actor, a trigger): look past it.
+			const RE::NiPoint3 dir = a_to - from;
+			const float        len = dir.Length();
+			const float        f = std::clamp(pd.GetHitFraction(), 0.0f, 1.0f);
+			const RE::NiPoint3 hit = from + dir * f;
+			if (len < 1.0f || (a_to - hit).Length() < 4.0f) {
+				return false;
+			}
+			from = hit + dir * (2.0f / len);
+		}
+		return false;
 	}
 
 	bool PickGroundAt(RE::TESObjectCELL* a_cell, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to, RE::NiPoint3& a_hit)

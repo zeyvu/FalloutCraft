@@ -8,7 +8,7 @@ import com.mojang.renderpearl.api.textures.GpuTexture;
 import dev.skycraft.SkyCraft;
 import dev.skycraft.link.Proto;
 import dev.skycraft.link.SkyLink;
-import java.lang.foreign.MemorySegment;
+import dev.skycraft.link.Shm;
 import net.minecraft.client.Minecraft;
 
 /**
@@ -102,12 +102,11 @@ public final class FrameExporter {
 		if (newest == null) {
 			return;
 		}
-		MemorySegment shm = SkyLink.segment();
+		Shm shm = SkyLink.segment();
 		if (shm != null) {
 			long bytes = (long) newest.width * newest.height * 4L;
 			try (GpuBufferSlice.MappedView view = newest.buffer.map(true, false)) {
-				MemorySegment src = MemorySegment.ofBuffer(view.data());
-				MemorySegment.copy(src, 0, shm, SkyLink.overlayBackSlotOffset(), Math.min(bytes, src.byteSize()));
+				shm.copyFrom(view.data(), SkyLink.overlayBackSlotOffset(), bytes);
 			}
 			SkyLink.publishOverlay(newest.width, newest.height, true, newest.frameId);
 		}

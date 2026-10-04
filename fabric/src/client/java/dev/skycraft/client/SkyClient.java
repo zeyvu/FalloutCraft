@@ -10,7 +10,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
+//#if MC_1_21_1
+//$$ import org.lwjgl.glfw.GLFW;
+//#else
 import org.lwjgl.sdl.SDLVideo;
+//#endif
 
 /**
  * Per-frame glue between the Minecraft client and Skyrim. Everything here runs on the render
@@ -46,6 +50,10 @@ public final class SkyClient {
 	private static int lastPacedSeq;
 	private static boolean skyrimStalled;
 	private static int exporterErrors;
+	//#if MC_1_21_1
+	//$$ // 1.21.1's Camera has no getFov(): GameRenderer's FOV modifier, eased per tick the same way (tickFov).
+	//$$ private static float fovModifier = 1.0F, oldFovModifier = 1.0F;
+	//#endif
 
 	private SkyClient() {
 	}
@@ -173,7 +181,11 @@ public final class SkyClient {
 		}
 
 		// Look direction is driven by Skyrim (zero-latency camera); MC uses it for everything else.
+		//#if MC_1_21_1
+		//$$ if (minecraft.screen == null) {
+		//#else
 		if (minecraft.gui.screen() == null) {
+		//#endif
 			player.setYRot(sky.yaw);
 			player.setXRot(sky.pitch);
 			player.yRotO = sky.yaw;
@@ -229,7 +241,35 @@ public final class SkyClient {
 		freezeWhileUnlinked(minecraft);
 		holdUntilReady(minecraft);
 		publishTick(minecraft);
+		//#if MC_1_21_1
+		//$$ tickFov(minecraft);
+		//#endif
 	}
+	//#if MC_1_21_1
+	//$$
+	//$$ /** GameRenderer.tickFov() in 1.21.1 (its fovModifier fields are private). */
+	//$$ private static void tickFov(Minecraft minecraft) {
+	//$$ 	float target = minecraft.getCameraEntity() instanceof net.minecraft.client.player.AbstractClientPlayer p ? p.getFieldOfViewModifier() : 1.0F;
+	//$$ 	oldFovModifier = fovModifier;
+	//$$ 	fovModifier += (target - fovModifier) * 0.5F;
+	//$$ 	fovModifier = net.minecraft.util.Mth.clamp(fovModifier, 0.1F, 1.5F);
+	//$$ }
+	//$$
+	//$$ /** GameRenderer.getFov(camera, partial, true) in 1.21.1 (private there). */
+	//$$ private static float fov(Minecraft minecraft, Camera camera, float partial) {
+	//$$ 	double fov = minecraft.options.fov().get().intValue();
+	//$$ 	fov *= net.minecraft.util.Mth.lerp(partial, oldFovModifier, fovModifier);
+	//$$ 	if (camera.getEntity() instanceof net.minecraft.world.entity.LivingEntity living && living.isDeadOrDying()) {
+	//$$ 		float t = Math.min(living.deathTime + partial, 20.0F);
+	//$$ 		fov /= (1.0F - 500.0F / (t + 500.0F)) * 2.0F + 1.0F;
+	//$$ 	}
+	//$$ 	var fluid = camera.getFluidInCamera();
+	//$$ 	if (fluid == net.minecraft.world.level.material.FogType.LAVA || fluid == net.minecraft.world.level.material.FogType.WATER) {
+	//$$ 		fov *= net.minecraft.util.Mth.lerp(minecraft.options.fovEffectScale().get(), 1.0, 0.85714287F);
+	//$$ 	}
+	//$$ 	return (float) fov;
+	//$$ }
+	//#endif
 
 	/**
 	 * Skyrim went quiet (a long loading screen, a stall, or it closed). Its collision around the
@@ -267,7 +307,11 @@ public final class SkyClient {
 		}
 		float tickMs = minecraft.level != null ? minecraft.level.tickRateManager().millisecondsPerTick() : 50.0F;
 		// The tick really "happened" partial ticks ago (DeltaTracker keeps the remainder).
+		//#if MC_1_21_1
+		//$$ float remainder = minecraft.getTimer().getGameTimeDeltaPartialTick(false);
+		//#else
 		float remainder = minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+		//#endif
 		mc.tickQpc = SkyLink.qpc() - (long) (remainder * tickMs * qpcFreq / 1000.0);
 		mc.tickMs = tickMs;
 		mc.prevX = player.xo;
@@ -285,11 +329,19 @@ public final class SkyClient {
 		eyeSmoothed += (player.getEyeHeight() - eyeSmoothed) * 0.5F;
 		mc.eyeHeightT = eyeSmoothed;
 		boolean bob = minecraft.options.bobView().get();
+		//#if MC_1_21_1
+		//$$ // 1.21.1 keeps the walk distance and bob on the entity itself (no avatar state yet).
+		//$$ mc.walkDistO = bob ? player.walkDistO : 0.0F;
+		//$$ mc.walkDist = bob ? player.walkDist : 0.0F;
+		//$$ mc.bobO = bob ? player.oBob : 0.0F;
+		//$$ mc.bob = bob ? player.bob : 0.0F;
+		//#else
 		var avatar = player.avatarState();
 		mc.walkDistO = bob ? avatar.getInterpolatedWalkDistance(0.0F) : 0.0F;
 		mc.walkDist = bob ? avatar.getInterpolatedWalkDistance(1.0F) : 0.0F;
 		mc.bobO = bob ? avatar.getInterpolatedBob(0.0F) : 0.0F;
 		mc.bob = bob ? avatar.getInterpolatedBob(1.0F) : 0.0F;
+		//#endif
 		SkyLink.writeMcState(mc);
 	}
 
@@ -389,9 +441,17 @@ public final class SkyClient {
 		LocalPlayer player = minecraft.player;
 		int flags = 0;
 		if (player != null && minecraft.level != null) {
+			//#if MC_1_21_1
+			//$$ float partial = minecraft.getTimer().getGameTimeDeltaPartialTick(false);
+			//#else
 			float partial = minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+			//#endif
 			Vec3 feet = player.getPosition(partial);
+			//#if MC_1_21_1
+			//$$ Camera camera = minecraft.gameRenderer.getMainCamera();
+			//#else
 			Camera camera = minecraft.gameRenderer.mainCamera();
+			//#endif
 			flags |= Proto.MC_IN_WORLD;
 			if (player.onGround()) {
 				flags |= Proto.MC_ON_GROUND;
@@ -422,34 +482,68 @@ public final class SkyClient {
 			mc.yaw = player.getYRot();
 			mc.pitch = player.getXRot();
 			// The eye, not the camera: in third person Minecraft's camera sits behind or in front.
+			//#if MC_1_21_1
+			//$$ Vec3 eye = camera.isDetached() ? player.getEyePosition(partial) : camera.getPosition();
+			//#else
 			Vec3 eye = camera.isDetached() ? player.getEyePosition(partial) : camera.position();
+			//#endif
 			mc.eyeHeight = (float) (eye.y - feet.y);
 			mc.eyeX = eye.x;
 			mc.eyeY = eye.y;
 			mc.eyeZ = eye.z;
+			//#if MC_1_21_1
+			//$$ mc.fov = fov(minecraft, camera, partial);
+			//#else
 			mc.fov = camera.getFov();
+			//#endif
 			// Minecraft's F5 camera: Skyrim puts its camera where Minecraft's would be.
 			mc.cameraMode = minecraft.options.getCameraType().ordinal();
+			//#if MC_1_21_1
+			//$$ mc.cameraDistance = camera.isDetached() ? (float) camera.getPosition().distanceTo(player.getEyePosition(partial)) : 0.0F;
+			//$$ // Walk bob, exactly what GameRenderer.bobView() uses this frame (1.21.1 reads the camera entity).
+			//$$ boolean bob = minecraft.options.bobView().get() && minecraft.getCameraEntity() instanceof net.minecraft.world.entity.player.Player;
+			//$$ if (bob) {
+			//$$ 	net.minecraft.world.entity.player.Player camPlayer = (net.minecraft.world.entity.player.Player) minecraft.getCameraEntity();
+			//$$ 	mc.bobPhase = -(camPlayer.walkDist + (camPlayer.walkDist - camPlayer.walkDistO) * partial);
+			//$$ 	mc.bobAmount = net.minecraft.util.Mth.lerp(partial, camPlayer.oBob, camPlayer.bob);
+			//$$ } else {
+			//$$ 	mc.bobPhase = 0.0F;
+			//$$ 	mc.bobAmount = 0.0F;
+			//$$ }
+			//#else
 			mc.cameraDistance = camera.isDetached() ? (float) camera.position().distanceTo(player.getEyePosition(partial)) : 0.0F;
 			// Walk bob, exactly what GameRenderer.bobView() uses this frame.
 			var entityState = minecraft.gameRenderer.gameRenderState().levelRenderState.cameraRenderState.entityRenderState;
 			boolean bob = minecraft.options.bobView().get() && entityState.isPlayer;
 			mc.bobPhase = bob ? entityState.backwardsInterpolatedWalkDistance : 0.0F;
 			mc.bobAmount = bob ? entityState.bob : 0.0F;
+			//#endif
 		}
+		//#if MC_1_21_1
+		//$$ if (minecraft.screen != null) {
+		//#else
 		if (minecraft.gui.screen() != null) {
+		//#endif
 			flags |= Proto.MC_SCREEN_OPEN;
 		}
 		mc.flags = flags;
 		mc.sensitivity = minecraft.options.sensitivity().get().floatValue();
 		mc.teleportAck = holdPos == null ? teleportAck : teleportAck - 1; // not "arrived" until we are released
+		//#if MC_1_21_1
+		//$$ mc.guiScale = (int) minecraft.getWindow().getGuiScale();
+		//#else
 		mc.guiScale = minecraft.getWindow().getGuiScale();
+		//#endif
 		mc.frameCounter = ++frameCounter;
 		SkyLink.writeMcState(mc);
 
 		if ((flags & Proto.MC_IN_WORLD) != 0) {
 			try {
+				//#if MC_1_21_1
+				//$$ WorldExporter.frame(minecraft, minecraft.getTimer().getGameTimeDeltaPartialTick(false));
+				//#else
 				WorldExporter.frame(minecraft, minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(false));
+				//#endif
 			} catch (RuntimeException e) {
 				if (exporterErrors++ < 5) {
 					SkyCraft.LOG.error("SkyCraft: world export failed", e);
@@ -485,7 +579,11 @@ public final class SkyClient {
 		Minecraft minecraft = Minecraft.getInstance();
 		var options = minecraft.options;
 		options.pauseOnLostFocus = false;
+		//#if MC_1_21_1
+		//$$ // 1.21.1 has no vignette option (the vignette only shows in Fancy graphics; nothing to turn off).
+		//#else
 		options.vignette().set(false);
+		//#endif
 		options.enableVsync().set(false);
 		options.framerateLimit().set(260);
 		// Minecraft doesn't draw the world itself; these only decide how far out placed blocks,
@@ -506,7 +604,11 @@ public final class SkyClient {
 			return;
 		}
 		windowHidden = true;
+		//#if MC_1_21_1
+		//$$ GLFW.glfwHideWindow(minecraft.getWindow().getWindow());
+		//#else
 		SDLVideo.SDL_HideWindow(minecraft.getWindow().handle());
+		//#endif
 		SkyCraft.LOG.info("SkyCraft: game window hidden (run with -Dskycraft.showWindow=true to keep it)");
 	}
 

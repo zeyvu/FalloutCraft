@@ -1,0 +1,32 @@
+modLoader="javafml"
+loaderVersion="[1,)"
+license="MIT"
+issueTrackerURL="https://github.com/zeyvu/FalloutCraft/issues"
+
+[[mods]]
+modId="skycraft"
+version="${version}"
+displayName="FalloutCraft"
+displayURL="https://github.com/zeyvu/FalloutCraft"
+authors="zeyvu, chasmlol (SkyCraft)"
+description='''Play Fallout 4 as a Minecraft player: Minecraft physics, inventory, HUD, building and combat inside the Commonwealth. Based on SkyCraft by chasmlol. Minecraft 1.21.1 build.'''
+
+[[mixins]]
+config="skycraft.mixins.json"
+
+[[mixins]]
+config="skycraft.client.mixins.json"
+
+[[dependencies.skycraft]]
+    modId="neoforge"
+    type="required"
+    versionRange="[21.1,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.skycraft]]
+    modId="minecraft"
+    type="required"
+    versionRange="[1.21.1,1.21.2)"
+    ordering="NONE"
+    side="BOTH"

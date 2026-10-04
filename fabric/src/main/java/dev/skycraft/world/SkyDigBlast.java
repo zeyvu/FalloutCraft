@@ -9,7 +9,9 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+//#if !MC_1_21_1
 import net.minecraft.world.level.ServerExplosion;
+//#endif
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
@@ -43,6 +45,19 @@ public final class SkyDigBlast {
 		this.cells.defaultReturnValue(Integer.MIN_VALUE);
 	}
 
+	//#if MC_1_21_1
+	//$$ /**
+	//$$  * For an explosion about to go off: null unless Skyrim's geometry around it is known. 1.21.1 has
+	//$$  * no ServerExplosion (and Explosion doesn't expose its level): the mixin passes its level, centre
+	//$$  * and radius.
+	//$$  */
+	//$$ public static @Nullable SkyDigBlast begin(ServerLevel level, Vec3 c, float radius) {
+	//$$ 	if (!SkyDig.destruction || !SkyCollision.active() || !SkyCollision.isKnown((int) Math.floor(c.x), (int) Math.floor(c.y), (int) Math.floor(c.z)) || !SkyLink.readSkyState(SKY)) {
+	//$$ 		return null;
+	//$$ 	}
+	//$$ 	return new SkyDigBlast(level, SKY.worldId, c, radius);
+	//$$ }
+	//#else
 	/** For an explosion about to go off: null unless Skyrim's geometry around it is known. */
 	public static @Nullable SkyDigBlast begin(ServerExplosion explosion) {
 		Vec3 c = explosion.center();
@@ -51,6 +66,7 @@ public final class SkyDigBlast {
 		}
 		return new SkyDigBlast(explosion.level(), SKY.worldId, c, explosion.radius());
 	}
+	//#endif
 
 	/**
 	 * What Skyrim geometry fills this cell as far as a blast cares: a Proto.DIG_* material if any of

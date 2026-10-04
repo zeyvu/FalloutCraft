@@ -84,7 +84,11 @@ public final class FalloutScavenge {
 		});
 		Component text = Component.literal("Found! ").withStyle(ChatFormatting.BOLD, ChatFormatting.YELLOW)
 			.append(Component.literal(String.join(", ", given)).withStyle(ChatFormatting.WHITE));
+		//#if MC_1_21_1
+		//$$ minecraft.gui.getChat().addMessage(text);
+		//#else
 		minecraft.gui.hud.getChat().addClientSystemMessage(text);
+		//#endif
 		dev.skycraft.SkyCraft.LOG.info("FalloutCraft: {} {} -> {}", kind == 1 ? "corpse" : "container", Integer.toHexString(refId), String.join(", ", given));
 	}
 

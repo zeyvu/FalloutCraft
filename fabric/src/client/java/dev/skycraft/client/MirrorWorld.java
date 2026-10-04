@@ -79,7 +79,11 @@ public final class MirrorWorld {
 	/** /leave: back to our own world. */
 	public static void leaveFriend(Minecraft minecraft) {
 		if (sessionJoin == null) {
+			//#if MC_1_21_1
+			//$$ minecraft.gui.getChat().addMessage(net.minecraft.network.chat.Component.literal("You're already in your own world."));
+			//#else
 			minecraft.gui.hud.getChat().addClientSystemMessage(net.minecraft.network.chat.Component.literal("You're already in your own world."));
+			//#endif
 			return;
 		}
 		SkyCraft.LOG.info("SkyCraft: /leave {}", sessionJoin);
@@ -90,19 +94,69 @@ public final class MirrorWorld {
 
 	private static void leaveWorld(Minecraft minecraft) {
 		attempted = false;
+		//#if MC_1_21_1
+		//$$ // What 1.21.1's pause screen does for "Save and Quit to Title" / "Disconnect".
+		//$$ boolean local = minecraft.isLocalServer();
+		//$$ if (minecraft.level != null) {
+		//$$ 	minecraft.level.disconnect();
+		//$$ }
+		//$$ if (local) {
+		//$$ 	minecraft.disconnect(new net.minecraft.client.gui.screens.GenericMessageScreen(net.minecraft.network.chat.Component.translatable("menu.savingLevel")));
+		//$$ } else {
+		//$$ 	minecraft.disconnect();
+		//$$ }
+		//$$ minecraft.setScreen(new TitleScreen());  // openWhenReady takes it from the title screen
+		//#else
 		minecraft.disconnectFromWorld(net.minecraft.client.multiplayer.ClientLevel.DEFAULT_QUIT_MESSAGE);
 		minecraft.gui.setScreen(new TitleScreen());  // openWhenReady takes it from the title screen
+		//#endif
 	}
 
 	/** Every client tick: a note for the player once they're in a world again. */
 	public static void tick(Minecraft minecraft) {
 		if (pendingNote != null && minecraft.player != null) {
+			//#if MC_1_21_1
+			//$$ minecraft.gui.getChat().addMessage(net.minecraft.network.chat.Component.literal(pendingNote));
+			//#else
 			minecraft.gui.hud.getChat().addClientSystemMessage(net.minecraft.network.chat.Component.literal(pendingNote));
+			//#endif
 			pendingNote = null;
 		}
 	}
 
 	public static void openWhenReady(Minecraft minecraft) {
+		//#if MC_1_21_1
+		//$$ // Couldn't reach a friend's world, or it closed under us: back to our own, and say why.
+		//$$ if (minecraft.screen instanceof net.minecraft.client.gui.screens.DisconnectedScreen && minecraft.level == null) {
+		//$$ 	pendingNote = sessionJoin != null
+		//$$ 		? "Couldn't stay in " + sessionJoin + " (check the link, and that your friend's world is still open to LAN). You're back in your own world."
+		//$$ 		: "Disconnected. You're back in your own world.";
+		//$$ 	SkyCraft.LOG.info("SkyCraft: disconnected; back to the mirror world");
+		//$$ 	sessionJoin = null;
+		//$$ 	attempted = false;
+		//$$ 	minecraft.setScreen(new TitleScreen());
+		//$$ 	return;
+		//$$ }
+		//$$ if (attempted && minecraft.level == null && minecraft.screen != null && System.currentTimeMillis() - lastLog > 5000) {
+		//$$ 	lastLog = System.currentTimeMillis();
+		//$$ 	SkyCraft.LOG.info("SkyCraft: still not in the mirror world; current screen {}", minecraft.screen.getClass().getName());
+		//$$ }
+		//$$ if (attempted || minecraft.level != null || minecraft.getOverlay() != null) {
+		//$$ 	return;
+		//$$ }
+		//$$ // Wait for the menu to settle on the title screen; skip any first-launch prompts in front of it.
+		//$$ if (!(minecraft.screen instanceof TitleScreen)) {
+		//$$ 	if (minecraft.screen != null && System.currentTimeMillis() - lastLog > 5000) {
+		//$$ 		lastLog = System.currentTimeMillis();
+		//$$ 		SkyCraft.LOG.info("SkyCraft: waiting on screen {} before opening the mirror world", minecraft.screen.getClass().getName());
+		//$$ 	}
+		//$$ 	if (minecraft.screen == null || minecraft.screen.getClass().getName().contains("Onboarding")) {
+		//$$ 		minecraft.setScreen(new TitleScreen());
+		//$$ 	}
+		//$$ 	return;
+		//$$ }
+		//$$ TitleScreen title = (TitleScreen) minecraft.screen;
+		//#else
 		// Couldn't reach a friend's world, or it closed under us: back to our own, and say why.
 		if (minecraft.gui.screen() instanceof net.minecraft.client.gui.screens.DisconnectedScreen && minecraft.level == null) {
 			pendingNote = sessionJoin != null
@@ -133,6 +187,7 @@ public final class MirrorWorld {
 			return;
 		}
 		TitleScreen title = (TitleScreen) minecraft.gui.screen();
+		//#endif
 		attempted = true;
 		// Multiplayer: join a friend's world (their e4mc link, or any server address) instead.
 		String join = sessionJoin != null ? sessionJoin : joinAddress(minecraft);
@@ -145,10 +200,25 @@ public final class MirrorWorld {
 		}
 		if (minecraft.getLevelSource().levelExists(SkyCraft.WORLD_NAME)) {
 			SkyCraft.LOG.info("SkyCraft: opening mirror world");
+			//#if MC_1_21_1
+			//$$ minecraft.createWorldOpenFlows().openWorld(SkyCraft.WORLD_NAME, () -> minecraft.setScreen(title));
+			//#else
 			minecraft.createWorldOpenFlows().openWorld(SkyCraft.WORLD_NAME, () -> minecraft.gui.setScreen(title));
+			//#endif
 			return;
 		}
 		SkyCraft.LOG.info("SkyCraft: creating mirror world");
+		//#if MC_1_21_1
+		//$$ LevelSettings settings = new LevelSettings(
+		//$$ 	SkyCraft.WORLD_NAME,
+		//$$ 	GameType.SURVIVAL,
+		//$$ 	false,
+		//$$ 	Difficulty.NORMAL,
+		//$$ 	true,
+		//$$ 	new net.minecraft.world.level.GameRules(),
+		//$$ 	WorldDataConfiguration.DEFAULT
+		//$$ );
+		//#else
 		LevelSettings settings = new LevelSettings(
 			SkyCraft.WORLD_NAME,
 			GameType.SURVIVAL,
@@ -156,6 +226,7 @@ public final class MirrorWorld {
 			true,
 			WorldDataConfiguration.DEFAULT
 		);
+		//#endif
 		minecraft.createWorldOpenFlows().createFreshLevel(
 			SkyCraft.WORLD_NAME,
 			settings,

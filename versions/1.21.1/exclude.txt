@@ -1,0 +1,11 @@
+# Minecraft 1.21.1: shared files left out of the 1.21.1 builds (read by tools/preprocess.py and
+# gradle/preprocess.gradle): mixins on 26.x-only renderer classes. Their 1.21.1 counterparts are in
+# versions/1.21.1/common (LevelRendererDirtyMixin, LevelRendererAccessor, the render-type
+# accessors), next to the 1.21.1 versions of WorldExporter, AvatarExporter and SkyAtlas.
+dev/skycraft/client/mixin/LevelExtractorMixin.java
+dev/skycraft/client/mixin/RenderSetupAccessor.java
+dev/skycraft/client/mixin/RenderTypeAccessor.java
+dev/skycraft/client/mixin/TextureBindingAccessor.java
+dev/skycraft/client/mixin/TextureManagerAccessor.java
+dev/skycraft/client/mixin/SpriteContentsAccessor.java
+dev/skycraft/client/mixin/ClientLevelAccessor.java

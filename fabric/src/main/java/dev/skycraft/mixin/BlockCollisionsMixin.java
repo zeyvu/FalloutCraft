@@ -5,6 +5,9 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.skycraft.world.SkyCollision;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.BlockCollisions;
+//#if MC_1_21_1
+//$$ import net.minecraft.world.level.BlockGetter;
+//#endif
 import net.minecraft.world.level.CollisionGetter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.shapes.CollisionContext;
@@ -24,13 +27,26 @@ public abstract class BlockCollisionsMixin {
 		method = "computeNext",
 		at = @At(
 			value = "INVOKE",
+//#if MC_1_21_1
+//$$ 			// 1.21.1: computeNext asks the block state, blockstate.getCollisionShape(this.collisionGetter, this.pos, this.context).
+//$$ 			target = "Lnet/minecraft/world/level/block/state/BlockState;getCollisionShape(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/phys/shapes/CollisionContext;)Lnet/minecraft/world/phys/shapes/VoxelShape;"
+//#else
 			target = "Lnet/minecraft/world/phys/shapes/CollisionContext;getCollisionShape(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/CollisionGetter;Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/phys/shapes/VoxelShape;"
+//#endif
 		)
 	)
+//#if MC_1_21_1
+//$$ 	private VoxelShape skycraft$addSkyrimShape(
+//$$ 		BlockState state, BlockGetter getter, BlockPos pos, CollisionContext context, Operation<VoxelShape> original
+//$$ 	) {
+//$$ 		VoxelShape blockShape = original.call(state, getter, pos, context);
+//$$ 		CollisionGetter level = (CollisionGetter) getter; // always BlockCollisions.collisionGetter
+//#else
 	private VoxelShape skycraft$addSkyrimShape(
 		CollisionContext context, BlockState state, CollisionGetter level, BlockPos pos, Operation<VoxelShape> original
 	) {
 		VoxelShape blockShape = original.call(context, state, level, pos);
+//#endif
 		// The walls of holes dug into Skyrim's ground: solid for everyone.
 		if (state.isAir()) {
 			VoxelShape wall = dev.skycraft.world.SkyDig.wallShape(level, pos);

@@ -1,5 +1,70 @@
 package dev.skycraft.mixin;
 
+//#if MC_1_21_1
+//$$ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+//$$ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+//$$ import dev.skycraft.world.SkyWater;
+//$$ import net.minecraft.core.BlockPos;
+//$$ import net.minecraft.world.entity.Entity;
+//$$ import net.minecraft.world.level.BlockGetter;
+//$$ import net.minecraft.world.level.Level;
+//$$ import net.minecraft.world.level.material.FluidState;
+//$$ import org.spongepowered.asm.mixin.Mixin;
+//$$ import org.spongepowered.asm.mixin.injection.At;
+//$$
+//$$ /**
+//$$  * Entities meet Skyrim's water (lakes, rivers, the sea) as Minecraft water: swimming, floating,
+//$$  * slow movement, drowning, splashes. See {@link SkyWater}.
+//$$  * <p>
+//$$  * Minecraft 1.21.1 has no EntityFluidInteraction: Entity works out the fluids it's in itself, in
+//$$  * updateFluidHeightAndDoFluidPushing (on NeoForge its no-argument version, which goes through every
+//$$  * fluid type) and the fluid at its eyes in updateFluidOnEyes. Neither has 26.x's early "any fluid
+//$$  * here at all?" check (hasFluidAndLoaded), so there is nothing to widen for that.
+//$$  */
+//$$ @Mixin(Entity.class)
+//$$ public abstract class EntityFluidInteractionMixin {
+//$$ 	@WrapOperation(
+//$$ 		method = {
+//#if NEOFORGE
+//$$ 			"updateFluidHeightAndDoFluidPushing()V",
+//#else
+//$$ 			"updateFluidHeightAndDoFluidPushing(Lnet/minecraft/tags/TagKey;D)Z",
+//#endif
+//$$ 			"updateFluidOnEyes()V"
+//$$ 		},
+//$$ 		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;getFluidState(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/material/FluidState;")
+//$$ 	)
+//$$ 	private FluidState skycraft$skyrimWater(Level level, BlockPos pos, Operation<FluidState> original) {
+//$$ 		FluidState state = original.call(level, pos);
+//$$ 		if (state.isEmpty() && SkyWater.active()) {
+//$$ 			FluidState water = SkyWater.fluidAt(level, pos);
+//$$ 			if (water != null) {
+//$$ 				return water;
+//$$ 			}
+//$$ 		}
+//$$ 		return state;
+//$$ 	}
+//$$
+//$$ 	@WrapOperation(
+//$$ 		method = {
+//#if NEOFORGE
+//$$ 			"updateFluidHeightAndDoFluidPushing()V",
+//#else
+//$$ 			"updateFluidHeightAndDoFluidPushing(Lnet/minecraft/tags/TagKey;D)Z",
+//#endif
+//$$ 			"updateFluidOnEyes()V"
+//$$ 		},
+//$$ 		at = @At(
+//$$ 			value = "INVOKE",
+//$$ 			target = "Lnet/minecraft/world/level/material/FluidState;getHeight(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;)F"
+//$$ 		)
+//$$ 	)
+//$$ 	private float skycraft$skyrimWaterHeight(FluidState state, BlockGetter level, BlockPos pos, Operation<Float> original) {
+//$$ 		float height = SkyWater.active() ? SkyWater.substitutedHeight(level, pos) : -1.0F;
+//$$ 		return height >= 0.0F ? height : original.call(state, level, pos);
+//$$ 	}
+//$$ }
+//#else
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.skycraft.world.SkyWater;
@@ -67,3 +132,4 @@ public abstract class EntityFluidInteractionMixin {
 		return height >= 0.0F ? height : original.call(state, level, pos);
 	}
 }
+//#endif

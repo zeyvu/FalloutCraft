@@ -85,10 +85,18 @@ public class SkyrimActorEntity extends LivingEntity {
 	}
 
 	@Override
+	//#if MC_1_21_1
+	//$$ protected void actuallyHurt(DamageSource source, float dmg) {
+	//#else
 	protected void actuallyHurt(ServerLevel level, DamageSource source, float dmg) {
+	//#endif
 		// Minecraft has applied everything (crit, sharpness, strength, cooldown, invulnerability
 		// frames). Hand the result to Skyrim instead of lowering our own health.
+		//#if MC_1_21_1
+		//$$ if (this.isInvulnerableTo(source) || dmg <= 0.0F) {
+		//#else
 		if (this.isInvulnerableTo(level, source) || dmg <= 0.0F) {
+		//#endif
 			return;
 		}
 		this.pendingDamage += dmg;
@@ -104,7 +112,11 @@ public class SkyrimActorEntity extends LivingEntity {
 	}
 
 	@Override
+	//#if MC_1_21_1
+	//$$ public void knockback(double power, double xd, double zd) {
+	//#else
 	public void knockback(double power, double xd, double zd, DamageSource source, float damage, boolean comesFromEffect) {
+	//#endif
 		// Skyrim owns this actor's position. Remember the strongest push for Skyrim's stagger:
 		// Minecraft pushes towards -(xd, zd).
 		double len = Math.sqrt(xd * xd + zd * zd);
@@ -123,7 +135,11 @@ public class SkyrimActorEntity extends LivingEntity {
 
 	/** Which kind of Skyrim weapon impact this hit should look and sound like. */
 	private static int weaponClass(DamageSource source) {
+		//#if MC_1_21_1
+		//$$ if (source.getDirectEntity() instanceof net.minecraft.world.entity.projectile.ThrownTrident) {
+		//#else
 		if (source.getDirectEntity() instanceof net.minecraft.world.entity.projectile.arrow.ThrownTrident) {
+		//#endif
 			return Proto.WEAPON_PIERCE;
 		}
 		if (source.getDirectEntity() instanceof Projectile) {
@@ -180,7 +196,11 @@ public class SkyrimActorEntity extends LivingEntity {
 	}
 
 	@Override
+	//#if MC_1_21_1
+	//$$ public boolean canBeCollidedWith() {
+	//#else
 	public boolean canBeCollidedWith(@Nullable Entity other) {
+	//#endif
 		return false;
 	}
 
@@ -208,4 +228,21 @@ public class SkyrimActorEntity extends LivingEntity {
 	public HumanoidArm getMainArm() {
 		return HumanoidArm.RIGHT;
 	}
+	//#if MC_1_21_1
+	//$$
+	//$$ // 1.21.1's LivingEntity leaves equipment to subclasses: the stand-in wears and holds nothing.
+	//$$ @Override
+	//$$ public Iterable<ItemStack> getArmorSlots() {
+	//$$ 	return java.util.Collections.nCopies(4, ItemStack.EMPTY);
+	//$$ }
+	//$$
+	//$$ @Override
+	//$$ public ItemStack getItemBySlot(net.minecraft.world.entity.EquipmentSlot slot) {
+	//$$ 	return ItemStack.EMPTY;
+	//$$ }
+	//$$
+	//$$ @Override
+	//$$ public void setItemSlot(net.minecraft.world.entity.EquipmentSlot slot, ItemStack stack) {
+	//$$ }
+	//#endif
 }

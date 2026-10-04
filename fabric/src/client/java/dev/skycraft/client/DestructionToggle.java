@@ -9,14 +9,14 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
-import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
-import net.fabricmc.fabric.api.client.screen.v1.Screens;
-import net.fabricmc.loader.api.FabricLoader;
+import dev.skycraft.platform.Platform;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The pause menu's "Skyrim destruction" button (its top left corner, clear of the menu at any GUI
@@ -29,16 +29,23 @@ public final class DestructionToggle {
 	}
 
 	private static Path file() {
-		return FabricLoader.getInstance().getConfigDir().resolve("skycraft.properties");
+		return Platform.get().configDir().resolve("skycraft.properties");
 	}
 
-	public static void register() {
-		load();
-		ScreenEvents.AFTER_INIT.register((minecraft, screen, width, height) -> {
-			if (screen instanceof PauseScreen pause && pause.showsPauseMenu() && minecraft.player != null) {
-				Screens.getWidgets(screen).add(button(minecraft));
-			}
-		});
+	/**
+	 * After a screen has been set up (the mod loader's screen-init event): the button for the pause
+	 * menu, or null for any other screen.
+	 */
+	public static @Nullable Button buttonFor(Minecraft minecraft, Screen screen) {
+		//#if MC_1_21_1
+		//$$ // The full menu (not F3+Esc's bare pause) is the one with buttons.
+		//$$ if (screen instanceof PauseScreen pause && pause.children().stream().anyMatch(c -> c instanceof Button) && minecraft.player != null) {
+		//#else
+		if (screen instanceof PauseScreen pause && pause.showsPauseMenu() && minecraft.player != null) {
+		//#endif
+			return button(minecraft);
+		}
+		return null;
 	}
 
 	private static Button button(Minecraft minecraft) {
@@ -60,7 +67,8 @@ public final class DestructionToggle {
 		return Component.literal("Skyrim destruction: " + (SkyDig.destruction ? "On" : "Off"));
 	}
 
-	private static void load() {
+	/** Reads the setting (once, at client start). */
+	public static void load() {
 		Properties props = new Properties();
 		try (var in = Files.newBufferedReader(file())) {
 			props.load(in);
